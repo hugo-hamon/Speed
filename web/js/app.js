@@ -1,6 +1,8 @@
 import { installLeaderboard } from './leaderboard.js';
 import { call } from './api.js';
-import { createState, addNode, undoNode, pathTime, selectionLimit, explorationProgress, acceptExplanation } from './state.js';
+import { createState, addNode, undoNode, pathTime, selectionLimit, explorationProgress, acceptExplanation, vehiclePosition } from './state.js';
+import { TRAFFIC_NAMES } from './traffic.js';
+import { ROUTE_REVEAL_SECONDS, routeRevealProgress } from './exploration.js';
 import { CityRenderer } from './renderer.js';
 import { Sound } from './audio.js';
 import { installConfig } from './config.js';
@@ -56,8 +58,9 @@ function setMap(map) {
   $('robot-label').textContent = ROBOTS[map.ai_type] + (map.ai_type === 'bfs' ? ` ${map.ai_depth}` : '');
   const fast=map.edges.some(edge=>(edge.speed_type||edge.road_type)==='fast');
   const directed=map.edges.some(edge=>edge.one_way);
-  $('direction-hint').textContent=[fast?'Traits blancs animés : rues rapides':'',directed?'Flèches : sens uniques':''].filter(Boolean).join(' · ');
-  show('direction-hint',fast||directed);
+  const traffic=map.edges.some(edge=>edge.traffic_event);
+  $('direction-hint').textContent=[fast?'Traits blancs : rues rapides':'',directed?'Flèches : sens uniques':'',traffic?'Feux, trains, ponts : attente selon ton arrivée':''].filter(Boolean).join(' · ');
+  show('direction-hint',fast||directed||traffic);
 }
 
 export async function home() {
@@ -130,6 +133,7 @@ export async function lockRoute(automatic = false) {
   const token = state.token;
   state.exploreStarted=Infinity;state.aiPaused=false;$('ai-pause').textContent='Pause';$('ai-step').textContent='AU TOUR DU ROBOT';$('ai-batch').hidden=state.ai.events.length<=state.aiSteps;
   $('ai-explanation-text').textContent='Ton trajet est verrouillé. Préparation de la recherche du robot…';
+  $('ai-focus').textContent='';
   setPhase('waiting'); $('stage-text').textContent = automatic ? 'On termine ton trajet…' : 'Ton trajet est prêt. À présent, observe le robot.';
   try {
     await state.selectionReady;
@@ -144,7 +148,7 @@ export async function lockRoute(automatic = false) {
 }
 
 function maybeRace(time) {
-  if (state.phase !== 'waiting' || busy || !state.ai || state.aiPaused || time - state.exploreStarted < state.exploreDuration+(state.aiMessageSeconds||3)) return;
+  if (state.phase !== 'waiting' || busy || !state.ai || state.aiPaused || time - state.exploreStarted < state.exploreDuration+Math.max(state.aiMessageSeconds||3,ROUTE_REVEAL_SECONDS+.5)) return;
   if(state.aiMessageKind!=='done' || time-state.exploreStarted-state.aiMessageChangedAt<(state.aiMessageSeconds||3))return;
   state.raceStarted = time; setPhase('race'); sound.startMotor(); sound.beep(840, .15);
   $('stage-text').textContent = state.assisted ? 'C’est parti ! Cette course ne compte pas pour les records.' : 'C’est parti ! Que le meilleur chemin gagne.';
@@ -177,7 +181,7 @@ function science() {
   if (!state.result) return;
   setPhase('science');
   const metadata = state.result.metadata;
-  $('science-description').textContent = metadata.depth ? `Ton robot ne regarde que ${metadata.depth} rues à l’avance. Il choisit ce qui semble le rapprocher du drapeau, sans regarder les ralentissements plus loin. Comme quelqu’un qui tourne trop tôt, il peut perdre du temps !` : 'Ce robot additionne le temps des rues pour comparer les chemins. Il trouve celui qui permet d’arriver le plus vite, même s’il fait un détour. Cette méthode s’appelle Dijkstra.';
+  $('science-description').textContent = metadata.depth ? `Ton robot ne regarde que ${metadata.depth} rues à l’avance. Il choisit ce qui semble le rapprocher du drapeau, sans regarder les ralentissements plus loin. Comme quelqu’un qui tourne trop tôt, il peut perdre du temps !` : 'Ce robot additionne le temps des rues pour comparer les chemins. Il trouve celui qui permet d’arriver le plus vite, même s’il fait un détour, en calculant aussi l’attente aux feux, aux trains et aux ponts selon son heure d’arrivée. Cette méthode s’appelle Dijkstra.';
   const saved = state.result.player_time - state.result.optimal_time;
   $('science-comparison').textContent = saved < .01 ? `Le chemin vert est le plus rapide : ${seconds(state.result.optimal_time)}. Tu as trouvé un chemin aussi rapide. Bien joué !` : `Le chemin vert prend ${seconds(state.result.optimal_time)}, soit ${seconds(saved)} de moins que ton trajet. Regarde où il évite les ralentissements ou les détours.`;
 }
@@ -211,18 +215,22 @@ function frame() {
   if(state.phase==='waiting'&&!busy){
     const progress=explorationProgress(state,time);
     const count=Math.floor(progress*state.ai.events.length),e=state.ai.events[Math.max(0,count-1)];
-    $('robot-status').textContent=progress>=1?'Son trajet est prêt !':`Il cherche · ${Math.round(progress*100)} %`;
+    $('robot-status').textContent=progress>=1?(routeRevealProgress(state,time)<1&&state.map.ai_type==='dijkstra'?'Il trace son trajet…':'Son trajet est prêt !'):`Il cherche · ${Math.round(progress*100)} %`;
     state.aiStep=count;
+    const currentNumber=count?state.map.nodes.findIndex(n=>n.id===e.node)+1:null;
+    $('ai-focus').textContent=progress>=1?'Recherche terminée':!count?'La recherche commence…':
+      ['explore','settle'].includes(e.kind)?`◎ Il examine le carrefour ${currentNumber}`:
+      `Il ${e.kind==='backtrack'?'revient':'avance'} vers le carrefour ${currentNumber}`;
     const kind=progress>=1?'done':e.kind;
     const elapsed=(state.aiPaused?state.aiPauseTime:time)-state.exploreStarted;
     if((count!==state.aiMessageEventCount || kind!==state.aiMessageKind) && acceptExplanation(state,kind,elapsed)){
       state.aiMessageEventCount=count;
       const number=state.map.nodes.findIndex(n=>n.id===e.node)+1;
-      const text=progress>=1?'Le trajet orange est retenu. Les deux voitures vont partir ensemble !':
-        e.kind==='settle'?'Ce robot utilise Dijkstra : il additionne le temps des rues et explore d’abord les carrefours accessibles le plus vite. Il trouve ainsi le trajet le plus rapide jusqu’à l’arrivée, en tenant compte des ralentissements, des rues rapides et des sens uniques.':
+      const text=progress>=1?'Le trajet retenu se dessine en orange. Les cases violettes s’effacent pour laisser le trajet bien visible. Les deux voitures vont partir ensemble !':
+        e.kind==='settle'?'Ce robot utilise Dijkstra : il additionne le temps des rues et explore d’abord les carrefours accessibles le plus vite. Il trouve ainsi le trajet le plus rapide jusqu’à l’arrivée, en tenant compte des ralentissements, des rues rapides, des sens uniques et de l’heure d’arrivée aux feux, trains et ponts levants.':
         e.kind==='advance'?`Il choisit d’avancer vers le carrefour ${number}, qui semble le rapprocher de l’arrivée. Les ralentissements ne sont pas pris en compte par ce robot.`:
         e.kind==='backtrack'?`Cette piste ne permet plus d’avancer : le robot revient au carrefour ${number} pour essayer ailleurs. Ce détour comptera dans sa course.`:
-        `Il regarde jusqu’à ${state.ai.metadata.depth} rues devant lui. Ici, il examine le carrefour ${number}, à ${e.depth} rue(s) de son point de recherche.`;
+        `Il regarde jusqu’à ${state.ai.metadata.depth} rues devant lui. Les cases violettes montrent les possibilités de cette étape. Elles s’effacent quand il avance. Le chemin orange grandit quand il décide d’avancer.`;
       $('ai-explanation-text').textContent=text;
       $('ai-step').textContent=progress>=1?'TRAJET TROUVÉ':state.map.ai_type==='dijkstra'?'DIJKSTRA · LE TRAJET LE PLUS RAPIDE':'IL EXPLORE LES POSSIBILITÉS';
     }
@@ -232,8 +240,12 @@ function frame() {
     const elapsed = time - state.raceStarted, total = pathTime(state.map, state.path);
     $('player-progress').style.width = `${Math.min(1,elapsed / total) * 100}%`;
     $('robot-progress').style.width = `${Math.min(1,elapsed / state.ai.travel_time) * 100}%`;
-    $('player-status').textContent = elapsed >= total ? 'Arrivé !' : seconds(elapsed);
-    $('robot-status').textContent = elapsed >= state.ai.travel_time ? 'Arrivé !' : seconds(elapsed);
+    const raceStatus=(path,total)=>{
+      const car=vehiclePosition(state.map,path,elapsed);
+      return elapsed>=total?'Arrivé !':car.waiting?`${TRAFFIC_NAMES[car.eventKind]} · ${seconds(car.waitRemaining)}`:seconds(elapsed);
+    };
+    $('player-status').textContent = raceStatus(state.path,total);
+    $('robot-status').textContent = raceStatus(state.ai.path,state.ai.travel_time);
     if (elapsed >= Math.max(total,state.ai.travel_time) + .65) finishRound();
     lastUi = time;
   }
@@ -248,7 +260,7 @@ $('ai-pause').addEventListener('click',()=>{
 });
 $('ai-skip').addEventListener('click',()=>{
   if(state.phase!=='waiting'||busy)return;
-  state.aiPaused=false;state.aiMessageKind='done';state.aiMessageChangedAt=-Infinity;state.exploreStarted=now()-state.exploreDuration-(state.aiMessageSeconds||3)-1;maybeRace(now());
+  state.aiPaused=false;state.aiMessageKind='done';state.aiMessageChangedAt=-Infinity;state.exploreStarted=now()-state.exploreDuration-Math.max(state.aiMessageSeconds||3,ROUTE_REVEAL_SECONDS+.5)-1;maybeRace(now());
 });
 $('play-button').addEventListener('click', startRound);
 $('replay-button').addEventListener('click', startRound);

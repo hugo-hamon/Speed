@@ -10,7 +10,8 @@ from pathlib import Path
 import networkx as nx
 
 from .algorithms import compute, dijkstra, path_time
-from .maps import DIFFICULTIES, MapRepository
+from .maps import DIFFICULTIES, MapRepository, validate_map
+from .traffic import add_traffic_events
 from .scores import ScoreStore
 from .leaderboard import LeaderboardStore
 from .config import BOARD_SIZES, ConfigStore, board_settings
@@ -63,11 +64,25 @@ class GameService:
         if self.config.value["map_source"] == "procedural":
             size = random.choice(self.config.value["sizes"][difficulty])
             data = generate_map(difficulty,size,random.SystemRandom().randrange(2**32),self.depth)
+        else:
+            data = deepcopy(self.repository.random(difficulty))
+            if difficulty != "easy":
+                seed = random.SystemRandom().randrange(2**32)
+                rng = random.Random(seed)
+                for _ in range(128):
+                    add_traffic_events(data, rng)
+                    try:
+                        validate_map(data)
+                        break
+                    except ValueError:
+                        continue
+                else:
+                    raise ValueError("Impossible de préparer la circulation. Relance une course.")
+                data["id"] += f"_traffic_v1_{seed}"
+        if data.get("procedural") or difficulty != "easy":
             self.generated[data["id"]] = (deepcopy(data), self._build_generated_graph(data))
             while len(self.generated) > 40:
                 self.generated.popitem(last=False)
-        else:
-            data = deepcopy(self.repository.random(difficulty))
         round_id = uuid4().hex
         self.rounds[round_id] = {"map_id": data["id"], "assisted": False, "result": None,
                                  "selection_started": None, "reflection_time": None, "locked_path": None}
@@ -128,7 +143,7 @@ class GameService:
         if state["result"]:
             raise ValueError("Cette manche est terminée.")
         cost = self._validate_path(graph, path, start)
-        suffix = dijkstra(graph, path[-1], goal)
+        suffix = dijkstra(graph, path[-1], goal, departure_time=cost)
         if cost + suffix["travel_time"] > data["max_travel_time"] + .0001:
             raise ValueError(f"Ce trajet dépasse la limite de {data['max_travel_time']} s. Annule une étape.")
         if state["locked_path"] is not None:

@@ -5,21 +5,25 @@ from itertools import count
 from math import hypot
 
 import networkx as nx
+from .traffic import edge_arrival
 
 
-def path_time(graph, path):
+def path_time(graph, path, departure_time=0.):
     if not path or any(node not in graph for node in path):
         raise ValueError("Le trajet contient un carrefour inconnu.")
     if any(not graph.has_edge(a, b) for a, b in zip(path, path[1:])):
         raise ValueError("Le trajet emprunte une route absente ou à contresens.")
-    return round(sum(graph[a][b]["travel_time"] for a, b in zip(path, path[1:])), 4)
+    arrival = departure_time
+    for a, b in zip(path, path[1:]):
+        arrival = edge_arrival(graph[a][b], arrival)
+    return round(arrival - departure_time, 6)
 
 
-def _result(graph, path, events, name, depth=None):
+def _result(graph, path, events, name, depth=None, departure_time=0.):
     return {
         "path": path,
         "visited_order": [event["node"] for event in events],
-        "travel_time": path_time(graph, path),
+        "travel_time": path_time(graph, path, departure_time),
         "events": events,
         "metadata": {"algorithm": name, "depth": depth,
                      "nodes_explored": len(events),
@@ -27,26 +31,28 @@ def _result(graph, path, events, name, depth=None):
     }
 
 
-def dijkstra(graph, start, goal):
+def dijkstra(graph, start, goal, departure_time=0.):
     if start not in graph or goal not in graph:
         raise ValueError("Départ ou destination inconnu.")
     serial = count()
-    queue = [(0.0, next(serial), start)]
-    distances, parents, settled, events = {start: 0.0}, {}, set(), []
+    # Periodic closures are FIFO: arriving earlier can never leave later.
+    # Earliest-arrival Dijkstra therefore still settles each node only once.
+    queue = [(departure_time, next(serial), start)]
+    distances, parents, settled, events = {start: departure_time}, {}, set(), []
     while queue:
         cost, _, node = heappop(queue)
         if node in settled:
             continue
         settled.add(node)
         events.append({"node": node, "source": parents.get(node), "depth": 0,
-                       "cost": round(cost, 4), "kind": "settle"})
+                       "cost": round(cost - departure_time, 4), "kind": "settle"})
         if node == goal:
             path = [goal]
             while path[-1] != start:
                 path.append(parents[path[-1]])
-            return _result(graph, list(reversed(path)), events, "Dijkstra")
+            return _result(graph, list(reversed(path)), events, "Dijkstra", departure_time=departure_time)
         for neighbor in sorted(graph.successors(node)):
-            candidate = cost + graph[node][neighbor]["travel_time"]
+            candidate = edge_arrival(graph[node][neighbor], cost)
             if candidate < distances.get(neighbor, float("inf")):
                 distances[neighbor] = candidate
                 parents[neighbor] = node

@@ -8,7 +8,7 @@ import pytest
 
 from speed.algorithms import compute
 from speed.config import BOARD_SIZES, DEFAULT_CONFIG, ConfigStore
-from speed.generator import generate_map
+from speed.generator import generate_map, _has_short_optimal_route, MIN_ROUTE_CLICKS
 from speed.maps import validate_map
 from speed.service import GameService
 
@@ -28,6 +28,7 @@ def test_generated_cities_have_no_dead_ends_and_real_choices(difficulty,size):
         start=next(n["id"] for n in data["nodes"] if n["type"]=="start")
         goal=next(n["id"] for n in data["nodes"] if n["type"]=="goal")
         optimal=nx.dijkstra_path_length(graph,start,goal,weight="travel_time")
+        assert not _has_short_optimal_route(graph,start,goal,MIN_ROUTE_CLICKS[difficulty])
         assert 6<=optimal<=15
         assert compute(graph,"myopic",start,goal)["travel_time"]>=optimal+1
         assert any(e["speed_type"]=="fast" for e in data["edges"])
@@ -44,6 +45,56 @@ def test_generation_reproducible_and_varied():
     other=generate_map("normal","large",123457)
     assert first["edges"]!=other["edges"]
     assert first["id"]!=other["id"]
+
+
+def test_click_filter_checks_ties_and_scoring_tolerance():
+    graph=nx.grid_2d_graph(3,3).to_directed()
+    for node in graph:
+        graph.nodes[node].update(x=node[0],y=node[1])
+    nx.set_edge_attributes(graph,1.,"travel_time")
+    # Several equally fast routes: a winding one must not hide a two-click L.
+    assert _has_short_optimal_route(graph,(0,0),(2,2),3)
+    assert not _has_short_optimal_route(graph,(0,0),(2,2),2)
+    for a,b in [((0,0),(1,0)),((0,0),(0,1))]:
+        graph[a][b]["travel_time"]+=.004
+    assert _has_short_optimal_route(graph,(0,0),(2,2),3)
+
+
+def test_click_filter_counts_choices_not_just_turns():
+    route=[(0,0),(1,0),(1,1),(2,1),(2,2)]
+    graph=nx.DiGraph()
+    for a,b in zip(route,route[1:]):
+        graph.add_edge(a,b,travel_time=1.)
+        graph.add_edge(b,a,travel_time=1.)
+    for node in graph:
+        graph.nodes[node].update(x=node[0],y=node[1])
+    # Four turns/segments, but a single forced corridor click is sufficient.
+    assert _has_short_optimal_route(graph,route[0],route[-1],2)
+    for a,b in zip(route,[(-1,0),(2,0),(0,1),(3,1)]):
+        graph.add_node(b,x=b[0],y=b[1])
+        graph.add_edge(a,b,travel_time=10.)
+        graph.add_edge(b,a,travel_time=10.)
+    assert not _has_short_optimal_route(graph,route[0],route[-1],4)
+    assert _has_short_optimal_route(graph,route[0],route[-1],5)
+    # An almost equally fast, straight alternative is still trivial to enter.
+    graph.add_node((0,2),x=0,y=2)
+    graph.add_edge((0,0),(0,1),travel_time=1.)
+    graph.add_edge((0,1),(0,2),travel_time=1.)
+    graph.add_node((1,2),x=1,y=2)
+    graph.add_edge((0,2),(1,2),travel_time=1.)
+    graph.add_edge((1,2),(2,2),travel_time=1.009)
+    assert _has_short_optimal_route(graph,route[0],route[-1],4)
+    graph[(1,2)][(2,2)]["travel_time"]=1.011
+    assert not _has_short_optimal_route(graph,route[0],route[-1],4)
+
+
+@pytest.mark.parametrize("size",["small","custom_3x4"])
+def test_tiny_expert_boards_still_generate(size):
+    data=generate_map("expert",size,42)
+    graph=validate_map(data)
+    start=next(n["id"] for n in data["nodes"] if n["type"]=="start")
+    goal=next(n["id"] for n in data["nodes"] if n["type"]=="goal")
+    assert not _has_short_optimal_route(graph,start,goal,5)
 
 
 def test_largest_generation_is_bounded():

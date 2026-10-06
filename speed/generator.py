@@ -8,11 +8,13 @@ import random
 
 import networkx as nx
 
-from .algorithms import compute
+from .algorithms import compute, dijkstra
+from .traffic import add_traffic_events, edge_arrival
 from .config import board_settings
 from .maps import DIFFICULTIES, validate_map
 
-GENERATOR_VERSION = 2
+GENERATOR_VERSION = 4
+MIN_ROUTE_CLICKS = {"easy": 0, "normal": 4, "expert": 5}
 
 
 def _directed(nodes, edges):
@@ -25,6 +27,68 @@ def _directed(nodes, edges):
     return graph
 
 
+def _has_short_optimal_route(graph, start, goal, minimum_clicks):
+    """Can a fastest route be entered in fewer than the required clicks?
+
+    Mirror the UI's straight-road and forced-corridor shortcuts, including
+    one-way streets. Search click endpoints, not individual shortest paths:
+    ties can contain exponentially many paths on a grid. Integer milliseconds
+    also include routes accepted as optimal by scoring (less than 0.01 s off).
+    """
+    if minimum_clicks <= 1:
+        return False
+    cost = lambda a, b, edge: round(edge["travel_time"] * 1000)
+    remaining = nx.single_source_dijkstra_path_length(graph.reverse(copy=False), goal, weight=cost)
+    limit = dijkstra(graph, start, goal)["travel_time"] + .009
+    frontier = {(None, start): 0.}
+    for _ in range(minimum_clicks - 1):
+        following = {}
+        for (previous, node), spent in frontier.items():
+            def record(before, target, total):
+                if total + remaining[target] / 1000 > limit + 1e-9:
+                    return False
+                key = (before, target)
+                following[key] = min(total, following.get(key, float("inf")))
+                return True
+
+            # Every endpoint along a straight street is a possible click,
+            # even when side streets branch off (straightExtension in the UI).
+            for neighbor in graph.successors(node):
+                dx = graph.nodes[neighbor]["x"] - graph.nodes[node]["x"]
+                dy = graph.nodes[neighbor]["y"] - graph.nodes[node]["y"]
+                before, target, total = node, neighbor, spent
+                while True:
+                    total = edge_arrival(graph[before][target], total)
+                    if not record(before, target, total) or target == goal:
+                        break
+                    choices = [n for n in graph.successors(target)
+                               if graph.nodes[n]["x"] - graph.nodes[target]["x"] == dx
+                               and graph.nodes[n]["y"] - graph.nodes[target]["y"] == dy]
+                    if len(choices) != 1:
+                        break
+                    before, target = target, choices[0]
+
+            # A forced corridor may turn: exclude only the node we came from,
+            # and stop at the first actual choice, just like corridorExtension.
+            before, current, total, seen = previous, node, spent, {node}
+            while current != goal:
+                choices = [n for n in graph.successors(current) if n != before]
+                if len(choices) != 1 or choices[0] in seen:
+                    break
+                target = choices[0]
+                total = edge_arrival(graph[current][target], total)
+                if not record(current, target, total):
+                    break
+                seen.add(target)
+                before, current = current, target
+        if any(node == goal for _, node in following):
+            return True
+        frontier = following
+        if not frontier:
+            break
+    return False
+
+
 def generate_map(difficulty, size, seed, depth=3):
     if difficulty not in DIFFICULTIES:
         raise ValueError("Difficulté ou taille inconnue.")
@@ -35,7 +99,10 @@ def generate_map(difficulty, size, seed, depth=3):
     settings = board_settings(size)
     width, height = settings["width"], settings["height"]
     rng = random.Random(seed)
-    for attempt in range(32):
+    # Small boards have fewer winding routes; allow more bounded retries now
+    # that trivial optimal routes are rejected as well as weak traffic traps.
+    max_attempts = 512 if difficulty == "expert" and width * height <= 12 else 128
+    for attempt in range(max_attempts):
         streets = nx.grid_2d_graph(width, height)
         river = rng.random() < .4
         river_y = rng.randrange(height - 1) + .5 if river else None
@@ -114,8 +181,13 @@ def generate_map(difficulty, size, seed, depth=3):
         scale = target_time / optimal
         for edge in edges:
             edge["travel_time"] = round(edge["travel_time"] * scale, 3)
+        add_traffic_events({"difficulty": difficulty, "edges": edges, "nodes": nodes}, rng)
         graph = _directed(nodes,edges)
-        optimal = nx.dijkstra_path_length(graph,start,goal,weight="travel_time")
+        optimal = dijkstra(graph,start,goal)["travel_time"]
+        if not 6 <= optimal <= 15:
+            continue
+        if _has_short_optimal_route(graph, start, goal, MIN_ROUTE_CLICKS[difficulty]):
+            continue
         myopic = compute(graph,"myopic",start,goal)
         if myopic["travel_time"] < optimal + 1:
             continue

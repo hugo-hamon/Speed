@@ -12,9 +12,9 @@
     ]
   },
   "ai_timing": {
-    "easy": 12,
-    "normal": 18,
-    "expert": 24,
+    "easy": 15,
+    "normal": 25,
+    "expert": 30,
     "message_seconds": 5
   }
 }

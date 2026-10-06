@@ -114,3 +114,13 @@ body.playing .stage-label,body.playing .route-controls,body.playing .race-progre
 #ai-explanation{position:absolute;z-index:3;left:50%;bottom:18px;transform:translateX(-50%);width:min(700px,80%);padding:16px 24px;background:#fff5e9f5;border:2px solid #e8a377;border-radius:18px;box-shadow:0 5px 20px #5c351c18}#ai-step{font-size:12px;color:#a34723;letter-spacing:1px}#ai-explanation p{font-size:16px;line-height:1.45;margin:8px 0}#ai-explanation>div{display:flex;align-items:center;justify-content:space-between}#ai-explanation button{padding:8px 14px}body[data-screen=waiting] .stage-label{display:none}
 
 .ai-timing-options{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px;border:1px solid #d7e1cc;border-radius:12px;padding:16px;margin:18px 0}.ai-timing-options legend{font-weight:bold;font-size:15px}.ai-timing-options label{display:grid;gap:7px;font-size:12px}.ai-timing-options input{width:100%;font:inherit;padding:10px;border:1px solid #cad9b6;border-radius:8px;background:#fffef5}
+
+/* Persistent search memory, distinct from the orange route. */
+#ai-explanation .search-legend{display:flex;flex-wrap:wrap;justify-content:flex-start;gap:8px 20px;margin:10px 0 12px;font-size:12px;color:#59496b}
+.search-legend span{display:inline-flex;align-items:center;gap:7px}
+.search-legend i{display:inline-block;flex-shrink:0;width:34px;height:10px;border-radius:8px}
+.search-legend .heat-key{width:14px;height:14px;border-radius:2px;background:#ac8dd6;border:1px solid #8860b5}
+.route-key{background:#dc744f;border:2px solid #fffef5;box-shadow:0 0 0 1px #dc744f}
+@media(max-width:760px){#ai-explanation{width:92%;padding:12px 16px;bottom:12px}#ai-explanation p{font-size:14px}#ai-explanation .search-legend{font-size:11px}}
+
+#ai-focus{display:block;color:#523078;font-size:13px;font-weight:700;margin:8px 0}

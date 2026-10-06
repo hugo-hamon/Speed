@@ -1,6 +1,8 @@
-import { COLORS, neighbors, vehiclePosition, explorationProgress } from './state.js';
+import { COLORS, neighbors, vehiclePosition } from './state.js';
+import { updateExploration, routeRevealProgress, heatOpacity } from './exploration.js';
 import { Camera } from './camera.js';
 import { TileLayer, SpriteAtlas } from './render-cache.js';
+import { drawTraffic } from './traffic-renderer.js';
 const WORLD_UNIT = 128;
 
 const clamp = (n, a, b) => Math.max(a, Math.min(b, n));
@@ -25,10 +27,13 @@ export class CityRenderer {
   layout(time) {
     const phase=this.state.phase,mobile=this.width<=760,home=phase==='home',result=['result','science'].includes(phase);
     const top=mobile?(home?355:result?100:250):home?(this.height>800?115:95):result?125:phase==='stress'?(this.height>800?240:205):145;
-    const bottom=mobile?(home?175:result?485:220):home?180:result?90:phase==='waiting'?230:phase==='stress'?(this.height>800?225:195):145;
+    const defaultBottom=mobile?(home?175:result?485:220):home?180:result?90:phase==='waiting'?230:phase==='stress'?(this.height>800?225:195):145;
+    const bottom=phase==='waiting'?Math.max(defaultBottom,(document.getElementById('ai-explanation')?.offsetHeight||0)+40):defaultBottom;
     const left=mobile?this.width*.04:this.width*(home?.44:result?.03:.035);
     const viewport={x:left,y:top,width:mobile?this.width*.92:this.width*(home?.54:result?.59:.93),height:Math.max(170,this.height-top-bottom)};
+    const previousCameraKey=this.camera.key;
     this.camera.configure(this.mapId,this.worldBounds,viewport,home?'home':result?'result':'game',WORLD_UNIT,this.reducedMotion);
+    if(phase==='waiting'&&previousCameraKey!==this.camera.key)this.camera.overview();
     if(phase==='preparation')this.camera.intro(time-this.state.phaseStarted,this.worldPoint(this.startNode.x,this.startNode.y),this.worldPoint(this.goalNode.x,this.goalNode.y),this.reducedMotion);
     if(phase==='race'){
       const key=this.camera.key+':'+this.state.raceStarted;
@@ -115,6 +120,7 @@ export class CityRenderer {
     this.pathCache=new Map();this.explored=null;this.viewKey=null;
     this.nodeOrdinals=new Map(map.nodes.map((n,i)=>[n.id,i+1]));
     this.fastEdges=map.edges.filter(e=>(e.speed_type||e.road_type)==='fast');
+    this.trafficEdges=map.edges.filter(e=>e.traffic_event);
     this.minX=Math.min(...map.nodes.map(n=>n.x));this.maxX=Math.max(...map.nodes.map(n=>n.x));
     this.minY=Math.min(...map.nodes.map(n=>n.y));this.maxY=Math.max(...map.nodes.map(n=>n.y));
     this.centerX=(this.minX+this.maxX)/2;this.centerY=(this.minY+this.maxY)/2;
@@ -144,6 +150,13 @@ export class CityRenderer {
     this.decorations.push({type:'garage',x:start.x-.32,y:start.y-.28,w:.35,d:.33,h:.25,color:'#8faabc'});
     const goalSide=goal.x<this.centerX?-1:1;
     this.decorations.push({type:'destination',x:goal.x+goalSide*.3,y:goal.y-goalSide*.3,w:.32,d:.32,h:.44,color:'#f4d890',mission:map.destination});
+    // Leave room for the local rail line and its passing train.
+    this.decorations=this.decorations.filter(d=>!['building','tree'].includes(d.type)||!this.trafficEdges.some(e=>{
+      if(e.traffic_event.kind!=='rail')return false;
+      const a=this.nodesById[e.source],b=this.nodesById[e.target],dx=b.x-a.x,dy=b.y-a.y;
+      const x=d.x-(a.x+b.x)/2,y=d.y-(a.y+b.y)/2;
+      return Math.abs(x*dx+y*dy)<.42 && Math.abs(-x*dy+y*dx)<1.15;
+    }));
     this.decorations.sort((a,b)=>(a.x+a.y)-(b.x+b.y));
   }
   ground(time) {
@@ -196,7 +209,7 @@ export class CityRenderer {
           this.box(a.x+(b.x-a.x)*t+.047,a.y+(b.y-a.y)*t+.047,.075,.075,.047,['#e2a36f','#e6c674','#dba990'][i],.025);
         }
       }
-      if(edge.road_type==='light') {
+      if(edge.road_type==='light'&&!edge.traffic_event) {
         const at=this.worldPoint((a.x+b.x)/2+.1,(a.y+b.y)/2+.1,.12);
         this.line({...at,sy:at.sy+12},at,'#566758',2); this.ellipse(at.sx,at.sy,4,5,'#f09664');
       }
@@ -242,35 +255,76 @@ export class CityRenderer {
       if(this.pathCache.size>=64)this.pathCache.delete(this.pathCache.keys().next().value);this.pathCache.set(key,shape);}
     const c=this.ctx;c.save();c.translate(0,offset);c.lineJoin='round';c.lineCap='round';c.lineWidth=width??Math.max(3,this.unit*.035);c.strokeStyle=color;c.setLineDash(dash);c.stroke(shape);c.restore();
   }
+  heatStamp(visits) {
+    // A square in the city's ground plane projects to a diamond. Its bounded
+    // inset bands soften the centre without spilling into neighbouring cells.
+    const level=Math.min(4,Math.floor(Math.log2(visits)));
+    this.heatStamps ||= new Map();
+    if(!this.heatStamps.has(level)) {
+      const canvas=document.createElement('canvas');canvas.width=256;canvas.height=128;
+      const c=canvas.getContext('2d');c.setTransform(1,.5,-1,.5,128,64);
+      const colors=['157,128,215','139,100,204','119,76,186','100,56,165','83,39,146'];
+      const half=this.unit*.20;
+      c.fillStyle=`rgba(${colors[level]},.36)`;c.fillRect(-half,-half,2*half,2*half);
+      c.fillStyle=`rgba(${colors[level]},.045)`;
+      for(let inset=2;inset<half;inset+=4)c.fillRect(-half+inset,-half+inset,2*(half-inset),2*(half-inset));
+      c.strokeStyle=`rgba(${colors[level]},.65)`;c.lineWidth=1.5;c.strokeRect(-half,-half,2*half,2*half);
+      this.heatStamps.set(level,canvas);
+    }
+    return this.heatStamps.get(level);
+  }
+  drawGrowingRoute(path, fractions) {
+    if(path.length<2)return;
+    const shape=new Path2D();let tip=null;
+    const first=this.nodesById[path[0]],start=this.worldPoint(first.x,first.y,.04);
+    shape.moveTo(start.sx,start.sy);
+    for(let i=1;i<path.length;i++) {
+      const amount=fractions[i-1];if(amount<=0)break;
+      const a=this.nodesById[path[i-1]],b=this.nodesById[path[i]];
+      tip=this.worldPoint(a.x+(b.x-a.x)*amount,a.y+(b.y-a.y)*amount,.04);
+      shape.lineTo(tip.sx,tip.sy);if(amount<1)break;
+    }
+    if(!tip)return;
+    const c=this.ctx;c.save();c.lineJoin='round';c.lineCap='round';
+    c.lineWidth=14;c.strokeStyle='#fffef5';c.stroke(shape);
+    c.lineWidth=8;c.strokeStyle=COLORS.robot;c.stroke(shape);c.restore();
+    this.ellipse(tip.sx,tip.sy,7,4.5,COLORS.robot,'#fffef5',2);
+  }
   exploration(time) {
     const s=this.state;if(!s.ai||!['waiting','race','result'].includes(s.phase))return;
     if(s.phase!=='waiting'){this.drawPath(s.ai.path,COLORS.robot,-3);return;}
     if(!Number.isFinite(s.exploreStarted))return;
-    if(s.aiPaused)time=s.aiPauseTime;
-    const progress=explorationProgress(s,time),events=s.ai.events;
-    const last=Math.min(events.length,Math.floor(progress*events.length));
-    if(!this.explored||this.explored.events!==events||last<this.explored.last)this.explored={events,last:0,recent:new Map(),route:[s.start]};
-    for(let i=this.explored.last;i<last;i++){
-      const e=events[i];this.explored.recent.set(e.node,{event:e,i});
-      if(['advance','backtrack'].includes(e.kind))this.explored.route.push(e.node);
+    const clock=s.aiPaused?s.aiPauseTime:time,elapsed=clock-s.exploreStarted;
+    const history=this.explored=updateExploration(this.explored,s,time),c=this.ctx;
+    for(const [id,visit] of history.heat) {
+      const opacity=heatOpacity(visit,s,time,this.reducedMotion);if(opacity<=0)continue;
+      const n=this.nodesById[id],p=this.worldPoint(n.x,n.y,.025);
+      if(!this.visible({left:p.sx-128,top:p.sy-64,width:256,height:128}))continue;
+      c.save();c.globalAlpha=opacity;
+      c.drawImage(this.heatStamp(visit.count),p.sx-128,p.sy-64);
+      this.ellipse(p.sx,p.sy,5,3,'#7650a8','#f3ecff',1.5);c.restore();
     }
-    this.explored.last=last;
-    const current=events[Math.max(0,last-1)];
-    let path=this.explored.route;
-    if(s.map.ai_type==='dijkstra'){
-      path=[current.node];const seen=new Set(path);
-      while(this.explored.recent.get(path[0])?.event.source){
-        const parent=this.explored.recent.get(path[0]).event.source;if(seen.has(parent))break;
-        seen.add(parent);path.unshift(parent);
-      }
+    const current=history.events[history.count-1];
+    if(history.count<history.events.length && ['explore','settle'].includes(current?.kind)) {
+      const n=this.nodesById[current.node],p=this.worldPoint(n.x,n.y,.045);
+      // A stationary target at the exact junction, never a travelling line.
+      // Keep it readable even when the camera shows a large city.
+      const radius=10/this.camera.zoom;
+      this.ellipse(p.sx,p.sy,radius,radius*.65,'#fffef5','#523078',2/this.camera.zoom);
+      this.ellipse(p.sx,p.sy,radius*.35,radius*.23,'#523078');
     }
-    if(progress>=1)path=s.ai.path;
-    this.drawPath(path,'#fffef5',0,[],14);this.drawPath(path,COLORS.robot,0,[],8);
-    if(progress<1){
-      if(current.source)this.drawPath([current.source,current.node],'#e87551',0);
-      const n=this.nodesById[current.node],p=this.worldPoint(n.x,n.y,.06);
-      this.ellipse(p.sx,p.sy,22,13,'#fff4dd','#d34e25',4);
-      this.label(`CARREFOUR ${this.nodeOrdinals.get(current.node)}`,p.sx,p.sy-35,'#8b341b','#fff5e5',13);
+    if(s.map.ai_type==='dijkstra') {
+      // Dijkstra's settled nodes are a search area, not a moving vehicle.
+      // Reveal the chosen route only once the goal has been settled.
+      if(history.count<s.ai.events.length)return;
+      const path=s.ai.path,lengths=path.slice(1).map((id,i)=>{
+        const a=this.nodesById[path[i]],b=this.nodesById[id];return Math.hypot(b.x-a.x,b.y-a.y);
+      });
+      let remaining=lengths.reduce((a,b)=>a+b,0)*routeRevealProgress(s,time);
+      this.drawGrowingRoute(path,lengths.map(length=>{const f=clamp(remaining/length,0,1);remaining-=length;return f;}));
+    } else {
+      const duration=this.reducedMotion?0:Math.min(.3,s.exploreDuration/Math.max(1,s.ai.events.length));
+      this.drawGrowingRoute(history.route,history.routeAt.map(at=>duration?clamp((elapsed-at)/duration,0,1):1));
     }
   }
   building(d) {
@@ -456,12 +510,14 @@ export class CityRenderer {
     this.layout(time);this.prepareSceneLayers();
     const v=this.renderViewport;c.save();c.beginPath();c.rect(v.x,v.y,v.width,v.height);c.clip();this.camera.apply(c,this.dpr);
     this.layers.base.draw(this);
+    drawTraffic(this,time,true);
     if(this.state.phase==='science')this.drawPath(this.state.result.optimal_path,COLORS.optimal,0);
     else if(this.state.phase!=='home'){if(this.state.phase!=='waiting'){this.exploration(time);this.drawPath(this.state.path,COLORS.player,3);}}
     else if(this.state.demo){this.drawPath(this.state.demo.a.path,COLORS.player,3);this.drawPath(this.state.demo.b.path,COLORS.robot,-3);}
     this.fastRoads(time);this.layers.arrows.draw(this);
     this.markers(time);
     this.drawSceneryAndVehicles(time);
+    drawTraffic(this,time);
     if(this.state.phase==='waiting')this.exploration(time);
     this.science();c.restore();this.confetti(time);
   }

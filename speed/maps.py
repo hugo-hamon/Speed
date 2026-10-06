@@ -6,7 +6,7 @@ from pathlib import Path
 
 import networkx as nx
 
-from .algorithms import compute
+from .algorithms import compute, dijkstra
 
 DIFFICULTIES = {"easy": "myopic", "normal": "bfs", "expert": "dijkstra"}
 
@@ -42,6 +42,16 @@ def validate_map(data):
         require(key not in used, "route dupliquée")
         require(edge.get("id") and edge["id"] not in edge_ids, "identifiant de route invalide")
         require(edge.get("road_type") in {"normal", "fast", "traffic", "bridge", "light"}, "type de route inconnu")
+        event = edge.get("traffic_event")
+        if event is not None:
+            require(data["difficulty"] != "easy" and isinstance(event, dict), "obstacle hors mode moyen/expert")
+            require(event.get("kind") in {"signal", "rail", "bridge"}, "obstacle inconnu")
+            require(all(type(event.get(k)) in (int,float) and math.isfinite(event[k])
+                        for k in ("period", "closed_for", "phase")), "cycle d’obstacle invalide")
+            require(0 < event["closed_for"] < event["period"] <= 30
+                    and 0 <= event["phase"] <= event["period"], "cycle d’obstacle invalide")
+            require(event["kind"] != "bridge" or data.get("river") and edge["road_type"] == "bridge",
+                    "pont levant sans rivière")
         require(not edge.get("one_way") or data["difficulty"] == "expert", "sens unique hors mode expert")
         used.add(key)
         edge_ids.add(edge["id"])
@@ -60,7 +70,7 @@ def validate_map(data):
     paths = nx.shortest_simple_paths(graph, start, goal, weight="travel_time")
     require(next(paths, None) is not None and next(paths, None) is not None,
             "deux itinéraires distincts requis")
-    optimal = nx.shortest_path_length(graph, start, goal, weight="travel_time")
+    optimal = dijkstra(graph, start, goal)["travel_time"]
     require(6 <= optimal <= 15, "durée optimale hors intervalle 6–15 secondes")
     limit = data.get("max_travel_time")
     require(isinstance(limit, (int, float)) and not isinstance(limit, bool)

@@ -1,10 +1,11 @@
+import { edgeJourney, STOP_FRACTION } from './traffic.js';
 export const SELECTION_SECONDS = 15;
 export const selectionLimit = state => state.map?.selection_seconds || SELECTION_SECONDS;
 export const COLORS = { player: '#3379ec', robot: '#e87551', optimal: '#7caa42' };
 const mapIndexes=new WeakMap();
 function indexFor(map) {
   let index=mapIndexes.get(map);if(index)return index;
-  index={nodes:Object.fromEntries(map.nodes.map(n=>[n.id,n])),edges:new Map(),neighbors:new Map(map.nodes.map(n=>[n.id,[]]))};
+  index={nodes:Object.fromEntries(map.nodes.map(n=>[n.id,n])),edges:new Map(),neighbors:new Map(map.nodes.map(n=>[n.id,[]])),hasTraffic:map.edges.some(e=>e.traffic_event)};
   for(const e of map.edges){
     index.edges.set(`${e.source}\0${e.target}`,e);index.neighbors.get(e.source).push(e.target);
     if(!e.one_way){index.edges.set(`${e.target}\0${e.source}`,e);index.neighbors.get(e.target).push(e.source);}
@@ -13,7 +14,26 @@ function indexFor(map) {
 }
 export function edgeBetween(map, a, b) {return indexFor(map).edges.get(`${a}\0${b}`);}
 export function pathTime(map, path) {
-  let time=0;for(let i=1;i<path.length;i++)time+=edgeBetween(map,path[i-1],path[i])?.travel_time??0;return time;
+  let time=0;for(let i=1;i<path.length;i++)time=edgeJourney(edgeBetween(map,path[i-1],path[i]),time).arrival;
+  return Math.round(time*1e6)/1e6;
+}
+// Earliest-arrival Dijkstra for validating a player's unfinished route. The
+// server repeats this check and remains authoritative for scores/completion.
+export function remainingTime(map, start, goal, departure) {
+  const index=indexFor(map);
+  if(!index.hasTraffic)return map.remaining_times[start];
+  const distances=new Map([[start,departure]]),queue=[[start,departure]],settled=new Set();
+  while(queue.length){
+    queue.sort((a,b)=>b[1]-a[1]);const [node,time]=queue.pop();
+    if(settled.has(node))continue;
+    if(node===goal)return time-departure;
+    settled.add(node);
+    for(const next of index.neighbors.get(node)){
+      const arrival=edgeJourney(edgeBetween(map,node,next),time).arrival;
+      if(arrival<(distances.get(next)??Infinity)){distances.set(next,arrival);queue.push([next,arrival]);}
+    }
+  }
+  return Infinity;
 }
 export function neighbors(map, node) {return indexFor(map).neighbors.get(node)||[];}
 // Suivre les routes alignées vers la cible, sans choisir de détour latéral.
@@ -59,8 +79,9 @@ export function addNode(state, node) {
   const extension = straightExtension(state, node) || corridorExtension(state, node);
   if (!extension || state.path.length + extension.length > 512) return false;
   const candidate = [...state.path, ...extension];
-  const remaining = state.map.remaining_times[node];
-  if (pathTime(state.map, candidate) + remaining > state.map.max_travel_time + .0001) {
+  const cost=pathTime(state.map,candidate);
+  const remaining = remainingTime(state.map,node,state.goal,cost);
+  if (cost + remaining > state.map.max_travel_time + .0001) {
     state.routeNotice = `Ce détour dépasse ${state.map.max_travel_time} s. Annule une étape pour changer de route.`;
     return false;
   }
@@ -76,15 +97,18 @@ export function undoNode(state) {
 }
 export function vehiclePosition(map, path, elapsed) {
   const nodes = indexFor(map).nodes;
-  let remaining = Math.max(0, elapsed);
+  elapsed=Math.max(0,elapsed);let departure=0;
   for (let i = 1; i < path.length; i++) {
     const edge = edgeBetween(map, path[i - 1], path[i]);
     const a = nodes[path[i - 1]], b = nodes[path[i]];
-    if (remaining < edge.travel_time) {
-      const t = remaining / edge.travel_time;
-      return { x: a.x + (b.x - a.x) * t, y: a.y + (b.y - a.y) * t, dx: b.x - a.x, dy: b.y - a.y, finished: false };
+    const journey=edgeJourney(edge,departure);
+    if (elapsed < journey.arrival) {
+      const waiting=elapsed>=journey.stopAt && elapsed<journey.releaseAt;
+      const t=waiting?STOP_FRACTION:(elapsed-departure-(elapsed>=journey.releaseAt?journey.wait:0))/journey.drive;
+      return { x: a.x + (b.x - a.x) * t, y: a.y + (b.y - a.y) * t, dx: b.x - a.x, dy: b.y - a.y, finished: false,
+        waiting,waitRemaining:waiting?journey.releaseAt-elapsed:0,edgeId:edge.id,eventKind:edge.traffic_event?.kind };
     }
-    remaining -= edge.travel_time;
+    departure=journey.arrival;
   }
   const end = nodes[path.at(-1)], prev = nodes[path.at(-2)] || end;
   return { ...end, dx: end.x - prev.x || 1, dy: end.y - prev.y, finished: true };

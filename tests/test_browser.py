@@ -261,21 +261,24 @@ def test_real_time_assisted_round_and_animation_costs(game):
       requestAnimationFrame(observe);
     }""")
     game.locator("#play-button").click()
-    game.wait_for_function("game.state.phase === 'result'", timeout=60000)
+    game.wait_for_function("game.state.phase === 'result'", timeout=90000)
     observed = game.evaluate("observedPhases")
     times = {entry["phase"]:entry["time"] for entry in observed}
     result = game.evaluate("game.state.result")
     assert result["assisted"]
     assert times["race"] - times["selection"] >= 14900
     assert game.evaluate("performance.now() - game.state.raceStarted*1000") >= max(result["player_time"],result["robot_time"])*1000
-    # La moitié du coût de chaque rue place le véhicule au milieu graphique,
-    # quelle que soit la longueur ou la lenteur de cette rue.
-    assert game.evaluate("""() => game.state.map.edges.every(e => {
+    # Le milieu est atteint après la moitié du roulage plus l'attente réelle
+    # au feu/train/pont, située avant ce milieu.
+    assert game.evaluate("""async () => {
+      const {edgeJourney}=await import('/js/traffic.js');
+      return game.state.map.edges.every(e => {
       const a = game.state.map.nodes.find(n=>n.id===e.source);
       const b = game.state.map.nodes.find(n=>n.id===e.target);
-      const at = rules.vehiclePosition(game.state.map,[e.source,e.target],e.travel_time/2);
+      const at = rules.vehiclePosition(game.state.map,[e.source,e.target],e.travel_time/2+edgeJourney(e,0).wait);
       return Math.abs(at.x-(a.x+b.x)/2)<1e-8 && Math.abs(at.y-(a.y+b.y)/2)<1e-8;
-    })""")
+      });
+    }""")
     intervals = sorted(game.evaluate("frameIntervals"))
     print(f"\nCadence observée en test headless : intervalle médian {intervals[len(intervals)//2]:.1f} ms")
 
@@ -924,3 +927,247 @@ def test_small_map_resolution_and_expert_explanation(game):
     screenshot(game,'small-map-sharp-expert.png')
     game.locator('#ai-skip').click()
     phase(game,'race')
+
+
+def test_search_heat_history_and_backtracking(game):
+    assert game.evaluate("""async () => {
+      const {updateExploration}=await import('/js/exploration.js');
+      const events=[{node:'a',kind:'explore'},
+        {node:'b',source:'a',kind:'explore'},
+        {node:'b',source:'a',kind:'advance'},
+        {node:'a',source:'b',kind:'backtrack'},
+        {node:'c',source:'a',kind:'advance'}];
+      const s={ai:{events},start:'a',exploreStarted:0,exploreDuration:5};
+      let h=updateExploration(null,s,0);
+      if(h.visits.size || h.route.length!==1)return false;
+      h=updateExploration(h,s,2);
+      if(h.visits.size!==2 || h.visits.get('b').count!==1 || h.visits.has('c'))return false;
+      h=updateExploration(h,s,4);
+      if(h.route.join()!=='a,b,a' || h.visits.get('a').count!==2 || h.visits.get('b').count!==2)return false;
+      s.aiPaused=true;s.aiPauseTime=4;
+      h=updateExploration(h,s,100);
+      if(h.count!==4 || h.visits.has('c'))return false;
+      s.aiPaused=false;h=updateExploration(h,s,5);
+      if(h.route.join()!=='a,b,a,c' || h.visits.size!==3)return false;
+      h=updateExploration(h,s,1);
+      if(h.count!==1 || h.visits.size!==1 || h.route.join()!=='a')return false;
+      s.ai.events=[{node:'c',kind:'explore'}];
+      return updateExploration(h,s,5).visits.size===1;
+    }""")
+
+
+@pytest.mark.parametrize('difficulty',['easy','normal','expert'])
+def test_current_search_heat_and_progressive_route(game,difficulty):
+    game.locator(f'[data-difficulty="{difficulty}"]').click()
+    game.wait_for_function('level=>game.state.demo && game.state.map.difficulty===level',arg=difficulty)
+    begin(game)
+    for node in optimal_route(game)[1:]:click_node(game,node)
+    game.locator('#validate-button').click()
+    game.wait_for_function("game.state.phase==='waiting' && Number.isFinite(game.state.exploreStarted)")
+    # Freeze the algorithm clock, not the render loop, to check persistence.
+    game.evaluate("""() => {
+      const s=game.state;s.aiPaused=true;s.aiPauseTime=s.exploreStarted+s.exploreDuration*.5;
+      game.renderer.render(performance.now()/1000);
+      window.heatBefore=[...game.renderer.explored.visits];
+    }""")
+    assert game.locator('.search-legend').is_visible()
+    assert game.evaluate("""() => {
+      const r=game.renderer,s=game.state,draw=r.drawGrowingRoute;let calls=0;
+      r.drawGrowingRoute=(...args)=>{calls++;return draw.apply(r,args)};
+      try {r.exploration(performance.now()/1000+100);} finally {r.drawGrowingRoute=draw;}
+      return JSON.stringify([...r.explored.visits])===JSON.stringify(heatBefore)
+        && (s.map.ai_type!=='dijkstra' || calls===0);
+    }""")
+    game.evaluate("""() => {
+      const s=game.state;s.aiPauseTime=s.exploreStarted+s.exploreDuration*.8;
+      game.renderer.render(performance.now()/1000);
+    }""")
+    assert game.evaluate('heatBefore.every(([id,v])=>game.renderer.explored.visits.get(id).count>=v.count)')
+    game.wait_for_function("document.getElementById('ai-focus').textContent.includes('carrefour')")
+    if difficulty=='expert':
+        assert 'Il examine le carrefour' in game.locator('#ai-focus').inner_text()
+        assert game.evaluate("""() => {
+          const r=game.renderer,ellipse=r.ellipse,targets=[];
+          r.ellipse=(x,y,rx,ry,fill,stroke,...args)=>{
+            if(stroke==='#523078')targets.push({x,y});
+            return ellipse.call(r,x,y,rx,ry,fill,stroke,...args);
+          };
+          try {r.render(performance.now()/1000);} finally {r.ellipse=ellipse;}
+          const e=r.explored.events[r.explored.count-1],n=r.nodesById[e.node],p=r.worldPoint(n.x,n.y,.045);
+          return targets.length===1 && targets[0].x===p.sx && targets[0].y===p.sy;
+        }""")
+    screenshot(game,f'heat-search-{difficulty}.png')
+    assert game.evaluate("""() => {
+      const s=game.state,r=game.renderer,draw=r.drawGrowingRoute;let route,amounts;
+      r.drawGrowingRoute=(path,fractions)=>{route=path;amounts=fractions;return draw.call(r,path,fractions)};
+      try {
+        s.aiPauseTime=s.exploreStarted+s.exploreDuration+.73;r.render(performance.now()/1000);
+        if(JSON.stringify(route)!==JSON.stringify(s.ai.path))return false;
+        if(s.map.ai_type==='dijkstra' && (!amounts.some(f=>f>0&&f<1)||amounts.at(-1)!==0))return false;
+        s.aiPauseTime=s.exploreStarted+s.exploreDuration+2;r.render(performance.now()/1000);
+        return amounts.every(f=>f===1);
+      } finally {r.drawGrowingRoute=draw;}
+    }""")
+    assert game.evaluate("""() => {
+      const r=game.renderer,stamp=r.heatStamp;let calls=0;
+      r.heatStamp=(...args)=>{calls++;return stamp.apply(r,args)};
+      try {r.render(performance.now()/1000);} finally {r.heatStamp=stamp;}
+      return calls===0;
+    }""")
+    screenshot(game,f'heat-route-{difficulty}.png')
+    game.set_viewport_size({'width':390,'height':844})
+    game.wait_for_function('game.renderer.width===390')
+    game.wait_for_function('Math.abs(game.renderer.camera.zoom-game.renderer.camera.targetZoom)<.002')
+    assert game.evaluate("""() => {
+      const v=game.renderer.camera.viewport,p=document.getElementById('ai-explanation').getBoundingClientRect();
+      return v.y+v.height<=p.top && p.left>=0 && p.right<=innerWidth
+        && game.state.map.nodes.every(n=>{const point=game.renderer.project(n.x,n.y);return game.renderer.camera.contains(point.sx,point.sy)});
+    }""")
+    screenshot(game,f'heat-mobile-{difficulty}.png')
+    game.locator('#ai-skip').click()
+    phase(game,'race')
+
+
+def test_search_colours_clear_between_steps(game):
+    assert game.evaluate("""async () => {
+      const {updateExploration,heatOpacity}=await import('/js/exploration.js');
+      const events=[{node:'a',kind:'explore'},{node:'b',kind:'explore'},
+        {node:'b',kind:'advance'},{node:'c',kind:'explore'},
+        {node:'c',kind:'advance'}];
+      const s={ai:{events},map:{ai_type:'bfs'},start:'a',exploreStarted:0,exploreDuration:5};
+      let h=updateExploration(null,s,2.5);
+      if(heatOpacity(h.heat.get('a'),s,2.5)!==1)return false;
+      h=updateExploration(h,s,3.2);
+      const fading=heatOpacity(h.heat.get('a'),s,3.2);
+      if(fading<=0 || fading>=1 || heatOpacity(h.heat.get('a'),s,3.5)!==0)return false;
+      s.aiPaused=true;s.aiPauseTime=3.2;
+      if(heatOpacity(h.heat.get('a'),s,100)!==fading)return false;
+      s.aiPaused=false;h=updateExploration(h,s,4.5);
+      if(heatOpacity(h.heat.get('a'),s,4.5)!==0 || heatOpacity(h.heat.get('c'),s,4.5)!==1)return false;
+      h=updateExploration(h,s,5.5);
+      if([...h.heat.values()].some(c=>heatOpacity(c,s,5.5)>0))return false;
+      s.map.ai_type='dijkstra';s.exploreDuration=10;
+      s.ai.events=Array.from({length:20},(_,i)=>({node:String(i),kind:'settle'}));
+      h=updateExploration(null,s,5.2);
+      if(heatOpacity(h.heat.get('0'),s,5.2)!==0 || heatOpacity(h.heat.get('9'),s,5.2)!==1)return false;
+      // Reduced motion removes old colours immediately at the step boundary.
+      return heatOpacity({...h.heat.get('9'),retiredAt:5.1},s,5.2,true)===0;
+    }""")
+
+
+def test_generated_routes_need_multiple_real_clicks(game):
+    import networkx as nx
+    from speed.generator import generate_map
+    from speed.maps import validate_map
+
+    cases=[]
+    for difficulty,size,minimum in [('normal','medium',4),('expert','small',5),('expert','large',5),('expert','custom_3x4',5)]:
+        for seed in [3,42,2026]:
+            data=generate_map(difficulty,size,seed)
+            graph=validate_map(data)
+            start=next(n['id'] for n in data['nodes'] if n['type']=='start')
+            goal=next(n['id'] for n in data['nodes'] if n['type']=='goal')
+            data['remaining_times']=nx.single_source_dijkstra_path_length(graph.reverse(copy=False),goal,weight='travel_time')
+            from speed.algorithms import dijkstra
+            cases.append({'map':data,'start':start,'goal':goal,'minimum':minimum,'optimal':dijkstra(graph,start,goal)['travel_time']})
+    # Independent check using the actual UI click handler, trying every node
+    # as a target. Covers straight shortcuts, automatic turns and one-way roads.
+    assert game.evaluate("""cases => cases.every(({map,start,goal,minimum,optimal})=>{
+      const limit=optimal+.009001;
+      let frontier=[{path:[start],cost:0}];
+      for(let clicks=1;clicks<minimum;clicks++){
+        const next=new Map();
+        for(const candidate of frontier)for(const target of map.nodes){
+          const s={map,start,goal,phase:'selection',locked:false,path:[...candidate.path]};
+          if(!rules.addNode(s,target.id))continue;
+          const cost=rules.pathTime(map,s.path);
+          if(cost+map.remaining_times[target.id]>limit)continue;
+          if(target.id===goal)return false;
+          const key=s.path.slice(-2).join('>');
+          if(!next.has(key)||next.get(key).cost>cost)next.set(key,{path:s.path,cost});
+        }
+        frontier=[...next.values()];
+      }
+      return true;
+    })""", cases)
+
+
+def test_traffic_clock_matches_server_and_stops_cars(game):
+    from speed.traffic import edge_arrival
+    edge={'id':'event','source':'a','target':'b','travel_time':1.,
+          'traffic_event':{'kind':'signal','period':6.,'closed_for':3.,'phase':0.}}
+    cases=[{'departure':t,'arrival':edge_arrival(edge,t)} for t in [0,.1,2.6499,2.65,3,5.6499,5.65,6,7.123,12]]
+    assert game.evaluate("""async ({edge,cases}) => {
+      const {edgeJourney}=await import('/js/traffic.js');
+      if(!cases.every(({departure,arrival})=>Math.abs(edgeJourney(edge,departure).arrival-arrival)<1e-8))return false;
+      const map={nodes:[{id:'a',x:0,y:0},{id:'b',x:1,y:0}],edges:[edge]};
+      const before=rules.vehiclePosition(map,['a','b'],.2),waiting=rules.vehiclePosition(map,['a','b'],1),
+        still=rules.vehiclePosition(map,['a','b'],2),after=rules.vehiclePosition(map,['a','b'],3.2);
+      return before.x<.35 && waiting.waiting && waiting.x===.35 && waiting.x===still.x
+        && after.x>.35 && !after.waiting && rules.pathTime(map,['a','b'])===3.65
+        && rules.vehiclePosition(map,['a','b'],3.65).finished;
+    }""",{'edge':edge,'cases':cases})
+
+
+def test_live_traffic_wait_and_final_score(game):
+    import networkx as nx
+    from speed.maps import validate_map
+    from speed.algorithms import path_time
+    from speed.traffic import traffic_wait, edge_arrival, STOP_FRACTION
+
+    begin(game)
+    data=game.evaluate('game.state.map')
+    graph=validate_map(data)
+    start=game.evaluate('game.state.start');goal=game.evaluate('game.state.goal')
+    chosen=None
+    for i,path in enumerate(nx.shortest_simple_paths(graph,start,goal,weight='travel_time')):
+        departure=0
+        for a,b in zip(path,path[1:]):
+            edge=graph[a][b];at=departure+edge['travel_time']*STOP_FRACTION
+            wait=traffic_wait(edge,at)
+            if wait>.3 and path_time(graph,path)<=data['max_travel_time']:
+                chosen=(path,at+wait/2,path_time(graph,path));break
+            departure=edge_arrival(edge,departure)
+        if chosen or i>200:break
+    assert chosen is not None
+    path,wait_at,total=chosen
+    for node in path[1:]:click_node(game,node)
+    assert game.evaluate('game.state.path')==path
+    assert game.evaluate('rules.pathTime(game.state.map,game.state.path)')==pytest.approx(total)
+    screenshot(game,'traffic-selection.png')
+    game.locator('#validate-button').click()
+    game.wait_for_function("game.state.phase==='waiting' && Number.isFinite(game.state.exploreStarted)")
+    game.locator('#ai-skip').click();phase(game,'race')
+    game.evaluate('t=>game.state.raceStarted=performance.now()/1000-t',wait_at)
+    game.wait_for_function('rules.vehiclePosition(game.state.map,game.state.path,performance.now()/1000-game.state.raceStarted).waiting')
+    screenshot(game,'traffic-waiting.png')
+    finish(game)
+    assert game.evaluate('game.state.result.player_time')==pytest.approx(total)
+
+
+def test_traffic_decor_closed_open_and_reduced_motion(game):
+    from speed.generator import generate_map
+    begin(game)
+    data=next(data for seed in range(20) if (data:=generate_map('normal','medium',seed))['river'])
+    game.evaluate("""map => {
+      const r=game.renderer;window.trafficOriginal={state:r.state,reducedMotion:r.reducedMotion};
+      const start=map.nodes.find(n=>n.type==='start').id,goal=map.nodes.find(n=>n.type==='goal').id;
+      map.ai_type='bfs';map.id+='-visual';
+      r.state={map,start,goal,path:[start],phase:'selection',ai:null,phaseStarted:0};
+      for(const e of map.edges)if(e.traffic_event)e.traffic_event.phase=.5;
+      r.reducedMotion=true;r.render(performance.now()/1000);r.overview();
+    }""",data)
+    try:
+        assert game.evaluate("new Set(game.renderer.trafficEdges.map(e=>e.traffic_event.kind)).size===3")
+        screenshot(game,'traffic-all-closed.png')
+        game.evaluate("""() => {
+          for(const e of game.renderer.trafficEdges)e.traffic_event.phase=e.traffic_event.closed_for+.5;
+          game.renderer.render(performance.now()/1000);
+        }""")
+        screenshot(game,'traffic-all-open.png')
+        assert game.evaluate("""async () => {
+          const {trafficState}=await import('/js/traffic.js');
+          return game.renderer.trafficEdges.every(e=>!trafficState(e,0).closed);
+        }""")
+    finally:
+        game.evaluate('game.renderer.state=trafficOriginal.state;game.renderer.reducedMotion=trafficOriginal.reducedMotion;game.renderer.render(performance.now()/1000)')
