@@ -1,0 +1,83 @@
+<!doctype html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="theme-color" content="#edf2e7">
+  <title>Speed — Arrive avant le robot !</title>
+  <link rel="icon" href="icon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="style.css">
+  <script src="/eel.js"></script>
+  <script type="module" src="js/app.js"></script>
+</head>
+<body data-screen="home">
+  <canvas id="city" aria-label="Ville isométrique : clique sur les carrefours voisins pour choisir ton trajet"></canvas>
+  <header class="topbar">
+    <button id="home-button" class="brand" aria-label="Speed — revenir à l’accueil"><svg viewBox="0 0 32 32" aria-hidden="true"><path d="M18 2 5 19h10l-1 11L28 12H17z" fill="currentColor"/></svg>speed<span class="brand-dot">.</span></button>
+    <div class="top-right"><span class="event-tag"><i></i> FÊTE DE LA SCIENCE</span><button id="sound-button" class="icon-button" aria-label="Activer le son" aria-pressed="false" title="Activer le son"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 9h4l5-4v14l-5-4H4zM17 9l5 6m0-6-5 6"/></svg></button></div>
+  </header>
+
+  <main>
+    <section id="home-panel" class="home-panel">
+      <h1>Arrive avant<br>le <span>robot !</span></h1>
+      <p class="intro">À toi de trouver le meilleur chemin.</p>
+      <button id="play-button" class="primary play-button">JOUER <span aria-hidden="true">↗</span></button>
+      <button id="leaderboard-button" class="secondary leaderboard-button">Classement des pilotes</button>
+      <button id="config-button" class="text-button config-button">⚙ &nbsp; Configuration</button>
+      <fieldset class="difficulty"><legend>Niveau de difficulté</legend><div class="difficulty-options"><button data-difficulty="easy" aria-pressed="false">Facile</button><button data-difficulty="normal" class="selected" aria-pressed="true">Normal</button><button data-difficulty="expert" aria-pressed="false">Expert</button></div></fieldset>
+      <button id="help-button" class="text-button">ⓘ &nbsp; Comment ça marche ?</button>
+    </section>
+    <section id="leaderboard" class="leaderboard" aria-label="Classement local" hidden>
+      <button id="leaderboard-back" class="text-button">← Retour au menu</button>
+      <div class="leaderboard-heading"><h2>Les meilleurs pilotes</h2><span>TOP 10 LOCAL</span></div>
+      <div class="leaderboard-tabs" role="tablist" aria-label="Difficulté du classement"><button id="rank-easy" role="tab" aria-controls="rank-panel" aria-selected="false" tabindex="-1" data-rank="easy">Facile</button><button id="rank-normal" role="tab" aria-controls="rank-panel" aria-selected="true" data-rank="normal">Normal</button><button id="rank-expert" role="tab" aria-controls="rank-panel" aria-selected="false" tabindex="-1" data-rank="expert">Expert</button></div>
+      <div id="rank-panel" role="tabpanel" aria-labelledby="rank-normal" tabindex="0"><table><thead><tr><th>Nom</th><th>Temps</th><th>Score</th></tr></thead><tbody id="rank-rows"></tbody></table><p id="rank-empty">À toi d’ouvrir le classement !</p></div><p id="rank-error" role="status" hidden></p>
+    </section>
+    <div id="demo-label" class="demo-label"><span class="live-dot"></span> LES ROBOTS S’ÉCHAUFFENT <span class="demo-sub">À toi de les dépasser.</span></div>
+
+    <section id="game-hud" class="game-hud" hidden aria-label="Tableau de course">
+      <div class="pilot player-pilot"><span class="pilot-icon">01</span><div><span class="overline">TOI</span><strong id="player-status">À toi de tracer !</strong></div></div>
+      <div class="mission"><span id="map-name" class="overline"></span><h2 id="mission-title"></h2><span id="direction-hint" hidden>➜ Suis les flèches : certaines rues sont à sens unique.</span></div>
+      <div class="pilot robot-pilot"><div><span id="robot-label" class="overline">ROBOT</span><strong id="robot-status">Il prépare son GPS…</strong></div><span class="pilot-icon">02</span></div>
+    </section>
+
+    <section id="ai-explanation" hidden aria-label="Recherche du robot"><strong id="ai-step">AU TOUR DU ROBOT</strong><p id="ai-explanation-text"></p><small id="ai-batch" hidden>Sur cette grande recherche, plusieurs vérifications sont regroupées à chaque étape.</small><div><button id="ai-pause" class="secondary">Pause</button><button id="ai-skip" class="text-button">Passer à la course →</button></div></section>
+    <div id="countdown" class="countdown" hidden aria-live="assertive"><span id="countdown-number">3</span><p>Repère l’arrivée !</p></div>
+    <div id="stage-label" class="stage-label" hidden><span class="live-dot"></span><span id="stage-text"></span></div>
+    <nav id="camera-controls" class="camera-controls" hidden aria-label="Caméra"><button id="zoom-out" aria-label="Dézoomer">−</button><button id="zoom-in" aria-label="Zoomer">+</button><button id="overview-button">Vue d’ensemble</button><span id="zoom-label">Molette : zoom</span></nav>
+
+    <section id="route-controls" class="route-controls" hidden aria-label="Choisir le trajet">
+      <div class="route-info"><span id="selection-hint">Clique sur un carrefour voisin</span><div><strong id="route-time">0,0 s</strong><span id="timer-label">15 s pour choisir</span></div><div class="timer-track"><i id="timer-fill"></i></div></div>
+      <button id="undo-button" class="secondary" disabled><span aria-hidden="true">↶</span> Annuler</button>
+      <button id="validate-button" class="primary" disabled>VALIDER LE TRAJET <span aria-hidden="true">→</span></button>
+    </section>
+    <div id="race-progress" class="race-progress" hidden><div><span>01 · TOI</span><i><b id="player-progress"></b></i></div><div><span>02 · ROBOT</span><i><b id="robot-progress"></b></i></div></div>
+
+    <section id="result-panel" class="result-panel" hidden aria-labelledby="result-title">
+      <span id="result-badge" class="eyebrow">LIGNE D’ARRIVÉE</span><h2 id="result-title">VICTOIRE !</h2><p id="result-subtitle"></p>
+      <div class="result-times"><div><span>TON TEMPS</span><strong id="result-player"></strong></div><div><span>LE ROBOT</span><strong id="result-robot"></strong></div></div>
+      <div class="difference"><span>Écart à l’arrivée</span><strong id="result-difference"></strong></div>
+      <div class="record"><span id="record-label">★ RECORD DU JOUR SUR CETTE CARTE</span><strong id="result-record">—</strong></div>
+      <p id="reflection-line" class="reflection-line"></p><p id="score-line" class="score-line"></p><p id="record-warning" class="warning" hidden></p>
+      <form id="ranking-form"><label for="player-name">Entre ton nom pour le classement</label><div><input id="player-name" maxlength="24" required autocomplete="off" placeholder="Ton nom ou pseudo"><button id="ranking-save" type="submit" class="secondary">Enregistrer</button></div></form><p id="ranking-status" role="status"></p>
+      <button id="replay-button" class="primary">NOUVELLE COURSE <span aria-hidden="true">↗</span></button>
+      <button id="science-button" class="text-button">Pourquoi ce chemin ? &nbsp; ⊕</button>
+    </section>
+
+    <section id="science-panel" class="science-panel" hidden aria-labelledby="science-title"><span class="eyebrow">POURQUOI CE CHEMIN ?</span><h2 id="science-title">Le chemin<br>le plus rapide.</h2><p id="science-comparison" class="science-answer"></p><p id="science-description"></p><div class="science-key"><p><b>Imagine des points reliés par des traits.</b><span>Les points sont les carrefours. Les traits sont les routes. Cet ensemble s’appelle un <strong>graphe</strong>.</span></p><p><b>Toutes les rues ne se parcourent pas aussi vite.</b><span>Le vert indique une rue rapide ; les petites voitures orange montrent un ralentissement. Le robot doit choisir !</span></p></div><button id="science-close" class="primary">RETOUR AU RÉSULTAT <span>→</span></button></section>
+
+    <div id="error-panel" class="error-panel" role="alert" hidden><strong>Un petit arrêt au garage…</strong><p id="error-message"></p><button id="retry-button" class="primary">REVENIR À L’ACCUEIL</button></div>
+  </main>
+  <section id="stress-panel" hidden aria-label="Test de fluidité">
+    <strong>Test de fluidité · Canvas 2D du jeu</strong>
+    <p id="stress-description">192 carrefours · 120 voitures · caméra animée</p>
+    <p id="stress-status" role="status">Préparation…</p><small id="stress-resolution"></small>
+    <p class="stress-note">Garde cet onglet visible. Les FPS dépendent aussi de l’écran et du CPU ; ils ne prouvent pas l’usage du GPU.</p>
+    <div class="stress-actions"><button id="stress-stop" class="secondary">Arrêter</button> <button id="stress-exit" class="secondary">Retour à l’accueil</button></div>
+  </section>
+  <footer class="footer" aria-label="Crédits"><div class="credits-track"><div class="credits-group"><strong>Université de Rouen — Sciences et Techniques</strong><span aria-hidden="true">·</span><span>Laboratoire LITIS — Équipe Apprentissage</span><span aria-hidden="true">·</span><strong>Hugo Hamon</strong><span aria-hidden="true">·</span><time id="current-date"></time><span aria-hidden="true">·</span></div></div></footer>
+  <dialog id="config-dialog" aria-labelledby="config-title"><button id="config-close" class="dialog-close" aria-label="Fermer la configuration">×</button><span class="eyebrow">RÉGLAGES DU STAND</span><h2 id="config-title">Une ville à ta mesure.</h2><form id="config-form"><label class="source-label" for="map-source">Type de cartes</label><select id="map-source"><option value="procedural">Nouvelles villes générées</option><option value="authored">Les 12 cartes préparées</option></select><p class="config-intro">Choisis les formats possibles pour chaque difficulté. À chaque course, une taille est tirée au sort parmi tes choix.</p><div class="custom-size-controls"><label>Largeur <input id="custom-width" type="number" min="3" max="30" value="12"></label><label>Hauteur <input id="custom-height" type="number" min="3" max="30" value="10"></label><button type="button" id="custom-add" class="secondary">Ajouter ce format</button></div><p class="config-note">Formats personnalisés : 3 à 30 intersections par côté, 750 au maximum. Coche ensuite les difficultés souhaitées. Jusqu’à 120 secondes pour tracer sur les plus grandes cartes.</p><div id="size-options"></div><p class="config-note">De 15 à 120 secondes pour tracer, selon la taille. Les grandes villes disposent du zoom et du suivi automatique.</p><fieldset class="ai-timing-options"><legend>Rythme de recherche du robot</legend><label>Facile · secondes<input id="ai-time-easy" type="number" min="5" max="120" step="0.5" value="12" required></label><label>Normal · secondes<input id="ai-time-normal" type="number" min="5" max="120" step="0.5" value="18" required></label><label>Expert · secondes<input id="ai-time-expert" type="number" min="5" max="120" step="0.5" value="24" required></label><label>Message · durée minimale<input id="ai-time-message_seconds" type="number" min="1" max="15" step="0.5" value="3" required></label></fieldset><p class="config-note">Durée cible par robot : sur une grande carte, davantage de vérifications sont regroupées pour garder ce rythme. La recherche continue pendant la lecture. Le type d’explication reste affiché au moins le temps choisi ; ses détails peuvent évoluer. La présentation du trajet final s’ajoute à la recherche. La fin de la démonstration attend la lecture des derniers messages.</p><div class="stress-options"><label>Test du moteur du jeu<select id="stress-size"><option value="16,12">16 × 12</option><option value="30,25">30 × 25</option></select></label><label>Voitures<select id="stress-cars"><option value="2">2</option><option value="120" selected>120</option></select></label><label>Caméra<select id="stress-motion"><option value="moving">Animée</option><option value="fixed">Fixe</option></select></label></div><button type="button" id="stress-start" class="secondary">Tester la fluidité · 17 secondes</button><p class="config-note">Firefox peut utiliser le GPU si l’accélération matérielle est disponible. Vérifie Paramètres → Général → Performances, puis la rubrique Graphiques de <code>about:support</code>. Ce test mesure les FPS ; il ne détecte pas l’utilisation du GPU.</p><p id="config-error" role="alert" hidden></p><div class="config-actions"><button type="button" id="config-reset" class="text-button">Réglages par défaut</button><button type="submit" id="config-save" class="primary">ENREGISTRER <span>✓</span></button></div></form></dialog>
+  <dialog id="help-dialog"><button id="help-close" class="dialog-close" aria-label="Fermer l’aide">×</button><span class="eyebrow">PRÊT EN 10 SECONDES</span><h2>Ton GPS, c’est toi.</h2><ol><li><b>Trace ta route.</b><span>Clique sur les carrefours voisins jusqu’au drapeau. Un clic droit ou « Annuler » retire une étape. La durée maximale est indiquée en bas.</span></li><li><b>Observe les rues.</b><span>Les traits blancs animés signalent les rues rapides ; les voitures orange, un ralentissement. La molette ajuste le zoom et « Vue d’ensemble » montre toute la ville. En Expert, suis les flèches des sens uniques. Après ta validation, observe le robot : le tracé orange et les explications montrent sa recherche. Tu peux mettre en pause.</span></li><li><b>Valide et fonce !</b><span>Les voitures partent ensemble. Trouver vite ton chemin rapporte un bonus ! À la fin du délai (15 à 120 secondes selon la taille), le jeu termine au besoin ton trajet ; ces parties ne comptent pas pour les records.</span></li></ol><button id="help-ready" class="primary">C’EST PARTI <span>→</span></button></dialog>
+  <div id="announcer" class="sr-only" aria-live="polite"></div>
+</body>
+</html>

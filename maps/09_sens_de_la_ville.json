@@ -1,0 +1,233 @@
+{
+  "id": "sens_de_la_ville_v2",
+  "name": "Le sens de la ville",
+  "difficulty": "expert",
+  "mission": "Livre la pizza !",
+  "destination": "pizza",
+  "background": "suburb_day",
+  "river": false,
+  "trap": false,
+  "nodes": [
+    {
+      "id": "A",
+      "x": 0,
+      "y": 2,
+      "type": "start"
+    },
+    {
+      "id": "B",
+      "x": 1,
+      "y": 2,
+      "type": "intersection"
+    },
+    {
+      "id": "C",
+      "x": 2,
+      "y": 2,
+      "type": "intersection"
+    },
+    {
+      "id": "D",
+      "x": 3,
+      "y": 2,
+      "type": "intersection"
+    },
+    {
+      "id": "E",
+      "x": 0,
+      "y": 1,
+      "type": "intersection"
+    },
+    {
+      "id": "F",
+      "x": 1,
+      "y": 1,
+      "type": "intersection"
+    },
+    {
+      "id": "G",
+      "x": 2,
+      "y": 1,
+      "type": "intersection"
+    },
+    {
+      "id": "H",
+      "x": 3,
+      "y": 1,
+      "type": "intersection"
+    },
+    {
+      "id": "I",
+      "x": 0,
+      "y": 0,
+      "type": "intersection"
+    },
+    {
+      "id": "J",
+      "x": 1,
+      "y": 0,
+      "type": "intersection"
+    },
+    {
+      "id": "K",
+      "x": 2,
+      "y": 0,
+      "type": "intersection"
+    },
+    {
+      "id": "L",
+      "x": 3,
+      "y": 0,
+      "type": "goal"
+    }
+  ],
+  "edges": [
+    {
+      "id": "AB",
+      "source": "A",
+      "target": "B",
+      "travel_time": 1.7,
+      "road_type": "normal",
+      "one_way": false,
+      "speed_type": "normal"
+    },
+    {
+      "id": "BC",
+      "source": "B",
+      "target": "C",
+      "travel_time": 1.7,
+      "road_type": "normal",
+      "one_way": true,
+      "speed_type": "normal"
+    },
+    {
+      "id": "CD",
+      "source": "C",
+      "target": "D",
+      "travel_time": 4.08,
+      "road_type": "traffic",
+      "one_way": false,
+      "speed_type": "traffic"
+    },
+    {
+      "id": "EF",
+      "source": "E",
+      "target": "F",
+      "travel_time": 1.7,
+      "road_type": "normal",
+      "one_way": false,
+      "speed_type": "normal"
+    },
+    {
+      "id": "FG",
+      "source": "F",
+      "target": "G",
+      "travel_time": 1.7,
+      "road_type": "normal",
+      "one_way": false,
+      "speed_type": "normal"
+    },
+    {
+      "id": "GH",
+      "source": "G",
+      "target": "H",
+      "travel_time": 1.7,
+      "road_type": "normal",
+      "one_way": true,
+      "speed_type": "normal"
+    },
+    {
+      "id": "IJ",
+      "source": "I",
+      "target": "J",
+      "travel_time": 1.7,
+      "road_type": "normal",
+      "one_way": true,
+      "speed_type": "normal"
+    },
+    {
+      "id": "JK",
+      "source": "J",
+      "target": "K",
+      "travel_time": 1.7,
+      "road_type": "normal",
+      "one_way": false,
+      "speed_type": "normal"
+    },
+    {
+      "id": "KL",
+      "source": "K",
+      "target": "L",
+      "travel_time": 1.7,
+      "road_type": "normal",
+      "one_way": false,
+      "speed_type": "normal"
+    },
+    {
+      "id": "AE",
+      "source": "A",
+      "target": "E",
+      "travel_time": 1.7,
+      "road_type": "normal",
+      "one_way": false,
+      "speed_type": "normal"
+    },
+    {
+      "id": "BF",
+      "source": "B",
+      "target": "F",
+      "travel_time": 1.105,
+      "road_type": "fast",
+      "one_way": false,
+      "speed_type": "fast"
+    },
+    {
+      "id": "CG",
+      "source": "C",
+      "target": "G",
+      "travel_time": 1.7,
+      "road_type": "normal",
+      "one_way": false,
+      "speed_type": "normal"
+    },
+    {
+      "id": "DH",
+      "source": "D",
+      "target": "H",
+      "travel_time": 1.7,
+      "road_type": "normal",
+      "one_way": false,
+      "speed_type": "normal"
+    },
+    {
+      "id": "EI",
+      "source": "E",
+      "target": "I",
+      "travel_time": 1.7,
+      "road_type": "normal",
+      "one_way": false,
+      "speed_type": "normal"
+    },
+    {
+      "id": "GK",
+      "source": "G",
+      "target": "K",
+      "travel_time": 1.105,
+      "road_type": "fast",
+      "one_way": false,
+      "speed_type": "fast"
+    },
+    {
+      "id": "HL",
+      "source": "H",
+      "target": "L",
+      "travel_time": 1.7,
+      "road_type": "normal",
+      "one_way": false,
+      "speed_type": "normal"
+    }
+  ],
+  "decoration_seed": 9,
+  "science_hint": "Une rue qui rapproche de l’arrivée peut coûter plus de temps. Compare les secondes sur les routes.",
+  "max_travel_time": 24
+}

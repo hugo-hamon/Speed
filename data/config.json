@@ -1,0 +1,20 @@
+{
+  "map_source": "procedural",
+  "sizes": {
+    "easy": [
+      "small"
+    ],
+    "normal": [
+      "medium"
+    ],
+    "expert": [
+      "huge"
+    ]
+  },
+  "ai_timing": {
+    "easy": 12,
+    "normal": 18,
+    "expert": 24,
+    "message_seconds": 5
+  }
+}
