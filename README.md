@@ -14,3 +14,7 @@ python app.py
 Le navigateur s’ouvre sur [http://localhost:8000](http://localhost:8000). Le terminal doit rester ouvert pendant le jeu ; `Ctrl+C` arrête le serveur.
 
 Pour jouer, il suffit de choisir un niveau, de préférence **Facile** pour commencer, puis de cliquer sur **JOUER**. Le trajet se construit en cliquant sur les carrefours voisins, du garage jusqu’au drapeau : les rues vertes sont rapides et les voitures orange signalent des ralentissements. **Annuler** permet de retirer la dernière étape. Une fois le trajet terminé, **Valider le trajet** lance la démonstration de recherche du robot, puis la course. Après l’arrivée, **Pourquoi ce chemin ?** permet d’observer le trajet optimal et **Nouvelle course** de recommencer.
+
+## Aperçu
+
+[![Aperçu du jeu Speed](./docs/game.png)](./docs/game.png)
