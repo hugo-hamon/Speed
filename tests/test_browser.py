@@ -1115,6 +1115,10 @@ def test_live_traffic_wait_and_final_score(game):
     from speed.algorithms import path_time
     from speed.traffic import traffic_wait, edge_arrival, STOP_FRACTION
 
+    # Expert has the three obstacle types; a single Normal light can validly
+    # stay green for every affordable route on a small authored map.
+    game.locator('[data-difficulty="expert"]').click()
+    game.wait_for_function("game.state.demo && game.state.map.difficulty==='expert'")
     begin(game)
     data=game.evaluate('game.state.map')
     graph=validate_map(data)
@@ -1148,17 +1152,47 @@ def test_live_traffic_wait_and_final_score(game):
 def test_traffic_decor_closed_open_and_reduced_motion(game):
     from speed.generator import generate_map
     begin(game)
-    data=next(data for seed in range(20) if (data:=generate_map('normal','medium',seed))['river'])
+    data=next(data for seed in range(20) if (data:=generate_map('expert','medium',seed))['river'])
     game.evaluate("""map => {
       const r=game.renderer;window.trafficOriginal={state:r.state,reducedMotion:r.reducedMotion};
       const start=map.nodes.find(n=>n.type==='start').id,goal=map.nodes.find(n=>n.type==='goal').id;
-      map.ai_type='bfs';map.id+='-visual';
+      map.ai_type='dijkstra';map.id+='-visual';
       r.state={map,start,goal,path:[start],phase:'selection',ai:null,phaseStarted:0};
       for(const e of map.edges)if(e.traffic_event)e.traffic_event.phase=.5;
       r.reducedMotion=true;r.render(performance.now()/1000);r.overview();
     }""",data)
     try:
         assert game.evaluate("new Set(game.renderer.trafficEdges.map(e=>e.traffic_event.kind)).size===3")
+        assert game.evaluate("""async () => {
+          const {drawTraffic,clipRaisedBridges}=await import('/js/traffic-renderer.js');
+          const r=game.renderer,ctx=r.ctx,label=r.label;
+          const edge=r.trafficEdges.find(e=>e.traffic_event.kind==='bridge');
+          const a=r.nodesById[edge.source],b=r.nodesById[edge.target];
+          const canvas=document.createElement('canvas');canvas.width=canvas.height=5;
+          const c=canvas.getContext('2d',{willReadFrequently:true});
+          const point=r.worldPoint((a.x+b.x)/2,(a.y+b.y)/2,.032);
+          let labels=0;
+          try {
+            r.label=()=>labels++;
+            drawTraffic(r,performance.now()/1000,'signals');drawTraffic(r,performance.now()/1000);
+            if(labels)return false;
+            r.ctx=c;c.translate(2-point.sx,2-point.sy);
+            r.layers.base.draw(r);
+            const water=c.getImageData(2,2,1,1).data;
+            if(!(water[2]>water[0]+25 && water[1]>water[0]+25))return false;
+            c.clearRect(point.sx-2,point.sy-2,5,5);
+            c.save();clipRaisedBridges(r,performance.now()/1000);
+            r.drawPath([a.id,b.id],'#ff0000',0,[],8);c.restore();
+            if(c.getImageData(2,2,1,1).data[3]!==0)return false;
+            const phase=edge.traffic_event.phase;
+            edge.traffic_event.phase=edge.traffic_event.closed_for+.5;
+            try {
+              c.save();clipRaisedBridges(r,performance.now()/1000);
+              r.drawPath([a.id,b.id],'#ff0000',0,[],8);c.restore();
+              return c.getImageData(2,2,1,1).data[0]===255;
+            } finally {edge.traffic_event.phase=phase;}
+          } finally {r.ctx=ctx;r.label=label;}
+        }""")
         screenshot(game,'traffic-all-closed.png')
         game.evaluate("""() => {
           for(const e of game.renderer.trafficEdges)e.traffic_event.phase=e.traffic_event.closed_for+.5;

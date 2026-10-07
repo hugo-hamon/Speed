@@ -78,7 +78,7 @@ class GameService:
                         continue
                 else:
                     raise ValueError("Impossible de préparer la circulation. Relance une course.")
-                data["id"] += f"_traffic_v1_{seed}"
+                data["id"] += f"_traffic_v2_{seed}"
         if data.get("procedural") or difficulty != "easy":
             self.generated[data["id"]] = (deepcopy(data), self._build_generated_graph(data))
             while len(self.generated) > 40:

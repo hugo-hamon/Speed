@@ -7,6 +7,7 @@ from pathlib import Path
 import networkx as nx
 
 from .algorithms import compute, dijkstra
+from .traffic import rail_is_dry
 
 DIFFICULTIES = {"easy": "myopic", "normal": "bfs", "expert": "dijkstra"}
 
@@ -46,6 +47,8 @@ def validate_map(data):
         if event is not None:
             require(data["difficulty"] != "easy" and isinstance(event, dict), "obstacle hors mode moyen/expert")
             require(event.get("kind") in {"signal", "rail", "bridge"}, "obstacle inconnu")
+            require(event["kind"] == "signal" or data["difficulty"] == "expert", "obstacle réservé au mode expert")
+            require(event["kind"] != "rail" or rail_is_dry(data,edge), "voie ferrée sur la rivière")
             require(all(type(event.get(k)) in (int,float) and math.isfinite(event[k])
                         for k in ("period", "closed_for", "phase")), "cycle d’obstacle invalide")
             require(0 < event["closed_for"] < event["period"] <= 30

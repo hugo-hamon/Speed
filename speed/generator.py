@@ -13,7 +13,7 @@ from .traffic import add_traffic_events, edge_arrival
 from .config import board_settings
 from .maps import DIFFICULTIES, validate_map
 
-GENERATOR_VERSION = 4
+GENERATOR_VERSION = 5
 MIN_ROUTE_CLICKS = {"easy": 0, "normal": 4, "expert": 5}
 
 
@@ -181,7 +181,8 @@ def generate_map(difficulty, size, seed, depth=3):
         scale = target_time / optimal
         for edge in edges:
             edge["travel_time"] = round(edge["travel_time"] * scale, 3)
-        add_traffic_events({"difficulty": difficulty, "edges": edges, "nodes": nodes}, rng)
+        add_traffic_events({"difficulty": difficulty, "edges": edges, "nodes": nodes,
+                            "river": river, "river_y": river_y}, rng)
         graph = _directed(nodes,edges)
         optimal = dijkstra(graph,start,goal)["travel_time"]
         if not 6 <= optimal <= 15:

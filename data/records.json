@@ -1,14 +1,15 @@
 {
-  "date": "2026-10-06",
+  "date": "2026-10-07",
   "records": {
-    "normal:generated_v2_normal_medium_3146951134": 9.202,
-    "expert:generated_v2_expert_huge_133526343": 13.404,
-    "easy:generated_v2_easy_small_5510826": 7.998,
-    "normal:generated_v2_normal_medium_900978874": 9.199,
-    "easy:generated_v3_easy_small_2858271775": 7.998,
-    "normal:generated_v3_normal_medium_3104980641": 9.199,
-    "expert:generated_v3_expert_huge_691257331": 13.398,
-    "normal:generated_v4_normal_medium_855515414": 10.516,
-    "expert:generated_v4_expert_huge_3377563046": 15.815
+    "easy:generated_v4_easy_small_3620408623": 7.998,
+    "normal:generated_v4_normal_medium_4097485199": 11.0558,
+    "expert:generated_v4_expert_huge_2430892143": 13.392,
+    "expert:generated_v5_expert_huge_2882067832": 13.577,
+    "expert:generated_v5_expert_huge_103443709": 17.5763,
+    "expert:generated_v5_expert_huge_2641738494": 13.406,
+    "expert:generated_v5_expert_huge_2702028894": 13.402,
+    "normal:generated_v5_normal_medium_1761727197": 9.199,
+    "normal:generated_v5_normal_medium_4194120050": 9.202,
+    "easy:generated_v5_easy_small_2979591068": 7.998
   }
 }

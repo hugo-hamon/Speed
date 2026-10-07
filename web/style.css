@@ -2,7 +2,7 @@
 
 /* Retours du stand : pied de page institutionnel, carte dégagée, aide mise en avant. */
 .home-panel{transform:translateY(-47%)}
-.home-panel .intro{max-width:360px}
+.home-panel .intro{max-width:400px}
 .demo-label{bottom:auto;font-size:18px;line-height:1.4;letter-spacing:1.1px;max-width:90vw}
 .demo-sub{font-size:16px;margin-top:5px}
 .footer{bottom:22px;align-items:flex-end;gap:25px;font-size:13px;line-height:1.7;letter-spacing:.25px;color:#6f8063}

@@ -2,7 +2,7 @@ import { COLORS, neighbors, vehiclePosition } from './state.js';
 import { updateExploration, routeRevealProgress, heatOpacity } from './exploration.js';
 import { Camera } from './camera.js';
 import { TileLayer, SpriteAtlas } from './render-cache.js';
-import { drawTraffic } from './traffic-renderer.js';
+import { drawTraffic, clipRaisedBridges } from './traffic-renderer.js';
 const WORLD_UNIT = 128;
 
 const clamp = (n, a, b) => Math.max(a, Math.min(b, n));
@@ -119,7 +119,7 @@ export class CityRenderer {
     this.nodesById=Object.fromEntries(map.nodes.map(n=>[n.id,n]));
     this.pathCache=new Map();this.explored=null;this.viewKey=null;
     this.nodeOrdinals=new Map(map.nodes.map((n,i)=>[n.id,i+1]));
-    this.fastEdges=map.edges.filter(e=>(e.speed_type||e.road_type)==='fast');
+    this.fastEdges=map.edges.filter(e=>(e.speed_type||e.road_type)==='fast'&&e.traffic_event?.kind!=='bridge');
     this.trafficEdges=map.edges.filter(e=>e.traffic_event);
     this.minX=Math.min(...map.nodes.map(n=>n.x));this.maxX=Math.max(...map.nodes.map(n=>n.x));
     this.minY=Math.min(...map.nodes.map(n=>n.y));this.maxY=Math.max(...map.nodes.map(n=>n.y));
@@ -193,14 +193,24 @@ export class CityRenderer {
     };
     // Deux passes : trottoirs continus, puis chaussée. Les carrefours sont
     // raccordés dans le même plan, sans bouts de segments superposés.
-    for(const e of map.edges)strip(nodes[e.source],nodes[e.target],e.road_type==='bridge'?.16:.145,'#d9dfc0');
+    const roadStrip=(edge,width,color)=>{
+      const a=nodes[edge.source],b=nodes[edge.target];
+      if(edge.traffic_event?.kind!=='bridge'){strip(a,b,width,color);return;}
+      // The movable deck is the only road over this opening. Do not bake
+      // asphalt or pavements underneath it into the static terrain cache.
+      const fraction=.28/Math.hypot(b.x-a.x,b.y-a.y);
+      const at=t=>({x:a.x+(b.x-a.x)*t,y:a.y+(b.y-a.y)*t});
+      strip(a,at(.5-fraction),width,color);strip(at(.5+fraction),b,width,color);
+    };
+    for(const e of map.edges)roadStrip(e,e.road_type==='bridge'?.16:.145,'#d9dfc0');
     for(const n of map.nodes)this.box(n.x,n.y,.29,.29,.012,'#d9dfc0');
     for(const edge of map.edges) {
       const color=(edge.speed_type||edge.road_type)==='fast'?'#63917d':(edge.speed_type||edge.road_type)==='traffic'?'#a48a70':'#77837c';
-      strip(nodes[edge.source],nodes[edge.target],.115,color);
+      roadStrip(edge,.115,color);
     }
     for(const n of map.nodes)this.box(n.x,n.y,.23,.23,.018,'#77837c');
     for(const edge of map.edges) {
+      if(edge.traffic_event?.kind==='bridge')continue;
       const a=nodes[edge.source],b=nodes[edge.target],p=this.worldPoint(a.x,a.y,.023),q=this.worldPoint(b.x,b.y,.023);
       if(!edge.one_way&&(edge.speed_type||edge.road_type)!=='fast')this.line({sx:p.sx+(q.sx-p.sx)*.22,sy:p.sy+(q.sy-p.sy)*.22},{sx:p.sx+(q.sx-p.sx)*.78,sy:p.sy+(q.sy-p.sy)*.78},'#dce0cc99',1.4,[5,7]);
       if((edge.speed_type||edge.road_type)==='traffic') {
@@ -221,14 +231,16 @@ export class CityRenderer {
       const a=nodes[e.source],b=nodes[e.target],length=Math.hypot(b.x-a.x,b.y-a.y);
       const dx=(b.x-a.x)/length,dy=(b.y-a.y)/length;
       const at=(t,along,across)=>[a.x+(b.x-a.x)*t+dx*along-dy*across,a.y+(b.y-a.y)*t+dy*along+dx*across,.038];
-      for(const t of [.32,.65]) {
+      const bridge=e.traffic_event?.kind==='bridge';
+      for(const t of bridge?[.12,.88]:[.32,.65]) {
         const arrow=[[-.095,-.025],[.015,-.025],[.015,-.067],[.11,0],[.015,.067],[.015,.025],[-.095,.025]];
-        this.polygon(arrow.map(([along,across])=>this.worldPoint(...at(t,along,across))),'#fffde8','#596b62',1);
+        this.polygon(arrow.map(([along,across])=>this.worldPoint(...at(t,along*(bridge?.7:1),across))),'#fffde8','#596b62',1);
       }
-      this.line(this.worldPoint(...at(.18,0,.105)),this.worldPoint(...at(.85,0,.105)),'#f4d779',Math.max(2,this.unit*.017));
+      for(const [start,end] of bridge?[[.05,.17],[.83,.95]]:[[.18,.85]])this.line(this.worldPoint(...at(start,0,.105)),this.worldPoint(...at(end,0,.105)),'#f4d779',Math.max(2,this.unit*.017));
     }
   }
   paintFastEdge(edge,a,b,time) {
+    if(edge.traffic_event?.kind==='bridge')return;
     const dx=b.x-a.x,dy=b.y-a.y;
     for(const side of [-1,1]) {
       const p=this.worldPoint(a.x+dx*.2-dy*.04*side,a.y+dy*.2+dx*.04*side,.032);
@@ -241,7 +253,7 @@ export class CityRenderer {
     if(this.state.phase==='science')return;
     const frame=this.reducedMotion?0:Math.floor((time*65%23)/23*16);
     for(const edge of this.fastEdges||this.state.map.edges) {
-      if((edge.speed_type||edge.road_type)!=='fast')continue;
+      if((edge.speed_type||edge.road_type)!=='fast'||edge.traffic_event?.kind==='bridge')continue;
       const a=this.nodesById[edge.source],b=this.nodesById[edge.target],p=this.worldPoint((a.x+b.x)/2,(a.y+b.y)/2);
       const key=`${b.x-a.x}:${b.y-a.y}:${!!edge.one_way}`,frames=this.fastFrames?.get(key);
       if(frames){if(this.visible({left:p.sx-64,top:p.sy-96,width:128,height:128}))this.fastAtlas.draw(frames[frame],p.sx,p.sy);}
@@ -510,15 +522,18 @@ export class CityRenderer {
     this.layout(time);this.prepareSceneLayers();
     const v=this.renderViewport;c.save();c.beginPath();c.rect(v.x,v.y,v.width,v.height);c.clip();this.camera.apply(c,this.dpr);
     this.layers.base.draw(this);
-    drawTraffic(this,time,true);
+    drawTraffic(this,time,'ground');
+    c.save();clipRaisedBridges(this,time);
     if(this.state.phase==='science')this.drawPath(this.state.result.optimal_path,COLORS.optimal,0);
     else if(this.state.phase!=='home'){if(this.state.phase!=='waiting'){this.exploration(time);this.drawPath(this.state.path,COLORS.player,3);}}
     else if(this.state.demo){this.drawPath(this.state.demo.a.path,COLORS.player,3);this.drawPath(this.state.demo.b.path,COLORS.robot,-3);}
-    this.fastRoads(time);this.layers.arrows.draw(this);
+    c.restore();this.fastRoads(time);this.layers.arrows.draw(this);
     this.markers(time);
+    // Trees and buildings occlude traffic lights, just like the rest of the scenery.
+    drawTraffic(this,time,'signals');
     this.drawSceneryAndVehicles(time);
     drawTraffic(this,time);
-    if(this.state.phase==='waiting')this.exploration(time);
+    if(this.state.phase==='waiting'){c.save();clipRaisedBridges(this,time);this.exploration(time);c.restore();}
     this.science();c.restore();this.confetti(time);
   }
   hitTest(clientX,clientY) {

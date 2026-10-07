@@ -1,7 +1,6 @@
 import { installLeaderboard } from './leaderboard.js';
 import { call } from './api.js';
 import { createState, addNode, undoNode, pathTime, selectionLimit, explorationProgress, acceptExplanation, vehiclePosition } from './state.js';
-import { TRAFFIC_NAMES } from './traffic.js';
 import { ROUTE_REVEAL_SECONDS, routeRevealProgress } from './exploration.js';
 import { CityRenderer } from './renderer.js';
 import { Sound } from './audio.js';
@@ -59,7 +58,7 @@ function setMap(map) {
   const fast=map.edges.some(edge=>(edge.speed_type||edge.road_type)==='fast');
   const directed=map.edges.some(edge=>edge.one_way);
   const traffic=map.edges.some(edge=>edge.traffic_event);
-  $('direction-hint').textContent=[fast?'Traits blancs : rues rapides':'',directed?'Flèches : sens uniques':'',traffic?'Feux, trains, ponts : attente selon ton arrivée':''].filter(Boolean).join(' · ');
+  $('direction-hint').textContent=[fast?'Traits blancs : rues rapides':'',directed?'Flèches : sens uniques':'',traffic?(map.difficulty==='expert'?'Feux, trains, ponts : attente selon ton arrivée':'Feux : attente selon ton arrivée'):''].filter(Boolean).join(' · ');
   show('direction-hint',fast||directed||traffic);
 }
 
@@ -181,7 +180,7 @@ function science() {
   if (!state.result) return;
   setPhase('science');
   const metadata = state.result.metadata;
-  $('science-description').textContent = metadata.depth ? `Ton robot ne regarde que ${metadata.depth} rues à l’avance. Il choisit ce qui semble le rapprocher du drapeau, sans regarder les ralentissements plus loin. Comme quelqu’un qui tourne trop tôt, il peut perdre du temps !` : 'Ce robot additionne le temps des rues pour comparer les chemins. Il trouve celui qui permet d’arriver le plus vite, même s’il fait un détour, en calculant aussi l’attente aux feux, aux trains et aux ponts selon son heure d’arrivée. Cette méthode s’appelle Dijkstra.';
+  $('science-description').textContent = metadata.depth ? `Le robot ne regarde que ${metadata.depth} rues à l’avance. Il choisit ce qui semble le rapprocher du drapeau, sans regarder les ralentissements plus loin. Comme quelqu’un qui tourne trop tôt, il peut perdre du temps !` : 'Ce robot additionne le temps des rues pour comparer les chemins. Il trouve celui qui permet d’arriver le plus vite, même s’il fait un détour, en calculant aussi l’attente aux feux, aux trains et aux ponts selon son heure d’arrivée. Cette méthode s’appelle Dijkstra.';
   const saved = state.result.player_time - state.result.optimal_time;
   $('science-comparison').textContent = saved < .01 ? `Le chemin vert est le plus rapide : ${seconds(state.result.optimal_time)}. Tu as trouvé un chemin aussi rapide. Bien joué !` : `Le chemin vert prend ${seconds(state.result.optimal_time)}, soit ${seconds(saved)} de moins que ton trajet. Regarde où il évite les ralentissements ou les détours.`;
 }
@@ -242,7 +241,7 @@ function frame() {
     $('robot-progress').style.width = `${Math.min(1,elapsed / state.ai.travel_time) * 100}%`;
     const raceStatus=(path,total)=>{
       const car=vehiclePosition(state.map,path,elapsed);
-      return elapsed>=total?'Arrivé !':car.waiting?`${TRAFFIC_NAMES[car.eventKind]} · ${seconds(car.waitRemaining)}`:seconds(elapsed);
+      return elapsed>=total?'Arrivé !':car.waiting?'En attente…':seconds(elapsed);
     };
     $('player-status').textContent = raceStatus(state.path,total);
     $('robot-status').textContent = raceStatus(state.ai.path,state.ai.travel_time);

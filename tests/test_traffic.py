@@ -8,7 +8,7 @@ from speed.algorithms import dijkstra, path_time
 from speed.generator import generate_map
 from speed.maps import validate_map, MapRepository
 from speed.service import GameService
-from speed.traffic import edge_arrival, traffic_wait, add_traffic_events
+from speed.traffic import edge_arrival, traffic_wait, add_traffic_events, rail_is_dry
 
 
 def traffic_graph():
@@ -53,15 +53,48 @@ def test_generated_obstacles_are_seeded_and_consistent(level):
         if level=='easy':
             assert not events
             continue
-        assert {'signal','rail'}<={e['kind'] for e in events}
-        if data['river']:assert any(e['kind']=='bridge' for e in events)
+        if level=='normal':assert {e['kind'] for e in events}=={'signal'}
+        else:
+            assert {'signal','rail'}<={e['kind'] for e in events}
+            if data['river']:assert any(e['kind']=='bridge' for e in events)
         kinds.update(e['kind'] for e in events)
         assert data==generate_map(level,'medium',seed)
         start=next(n['id'] for n in data['nodes'] if n['type']=='start')
         goal=next(n['id'] for n in data['nodes'] if n['type']=='goal')
         result=dijkstra(graph,start,goal)
         assert result['travel_time']==path_time(graph,result['path'])
-    if level!='easy':assert kinds=={'signal','rail','bridge'}
+    if level=='normal':assert kinds=={'signal'}
+    if level=='expert':assert kinds=={'signal','rail','bridge'}
+
+
+def test_rail_footprint_stays_on_land_for_authored_and_generated_maps():
+    maps=list(MapRepository().maps.values())
+    maps.extend(generate_map('expert','small',seed) for seed in range(30))
+    for original in maps:
+        for seed in range(5):
+            data=deepcopy(original);add_traffic_events(data,random.Random(seed))
+            nodes={n['id']:n for n in data['nodes']}
+            for edge in data['edges']:
+                kind=edge.get('traffic_event',{}).get('kind')
+                if data['difficulty']=='normal':assert kind in (None,'signal')
+                if kind!='rail' or not data['river']:continue
+                a,b=nodes[edge['source']],nodes[edge['target']]
+                length=((b['x']-a['x'])**2+(b['y']-a['y'])**2)**.5
+                dx,dy=(b['x']-a['x'])/length,(b['y']-a['y'])/length
+                river=data.get('river_y',.5)
+                # Check the full moving carriage extent, not just the road.
+                ys=[(a['y']+b['y'])/2+dy*along+dx*across
+                    for along in [-.16,.16] for across in [-1.10,1.10]]
+                assert max(ys)<river-.22 or min(ys)>river+.22
+
+
+def test_rail_never_falls_back_to_water_when_no_dry_site_exists():
+    data={'difficulty':'expert','river':True,'river_y':.5,
+          'nodes':[{'id':'a','x':0,'y':0},{'id':'b','x':1,'y':0}],
+          'edges':[{'source':'a','target':'b','road_type':'normal'} for _ in range(3)]}
+    assert not rail_is_dry(data,data['edges'][0])
+    add_traffic_events(data,random.Random(0))
+    assert all(e.get('traffic_event',{}).get('kind')!='rail' for e in data['edges'])
 
 
 def test_authored_rounds_have_independent_cycles_and_completion(tmp_path):

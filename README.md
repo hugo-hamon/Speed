@@ -19,7 +19,7 @@ Pendant la recherche du robot, des cases violettes carrées indiquent les zones 
 
 Les cartes générées demandent au moins **4 clics en mode moyen** et **5 en mode difficile** pour saisir un trajet optimal, même avec les raccourcis sur les rues droites et dans les couloirs. Le mode facile conserve ses trajets plus simples.
 
-Dès le mode moyen, des feux tricolores et des passages à niveau rythment la circulation. Sur les cartes avec rivière, un bateau peut provoquer la levée d’un pont. Les cycles sont tirés au sort à chaque nouvelle manche et démarrent au départ commun des voitures : l’attente dépend de l’heure d’arrivée de chacune. Les voitures s’arrêtent réellement devant l’obstacle. Le temps annoncé du trajet, Dijkstra et les scores tiennent compte des mêmes cycles. Avant la course, le décor montre leur état initial.
+Le mode moyen ajoute des feux tricolores. Le mode difficile conserve les feux et ajoute des trains sur la terre ferme ainsi que, sur les cartes avec rivière, des bateaux avec pont levant. Les cycles sont tirés au sort à chaque nouvelle manche et démarrent au départ commun des voitures : l’attente dépend de l’heure d’arrivée de chacune. Les voitures s’arrêtent réellement devant l’obstacle. Le temps annoncé du trajet, Dijkstra et les scores tiennent compte des mêmes cycles. Avant la course, le décor montre leur état initial.
 
 Pour ralentir la disparition des cases de Dijkstra, modifier `DIJKSTRA_TRAIL_MIN_SECONDS` et `DIJKSTRA_TRAIL_MAX_SECONDS` dans `web/js/exploration.js` (maintien avant effacement), puis `HEAT_FADE_SECONDS` pour la durée du fondu, partagée par les robots.
 
